@@ -13,10 +13,10 @@ import {
   type Prediction,
   type PredictionResult,
 } from '@prisma/client';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 
 // common
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { XAUUSD_SYMBOL } from '../../constants';
 
 // modules
 import { MarketService } from '../market/market.service';
@@ -38,7 +38,7 @@ import {
 } from '../orchestrator/orchestrator.tokens';
 
 export interface EvaluateDueSkipped {
-  id: string;
+  id?: string;
   reason: string;
 }
 
@@ -61,6 +61,7 @@ export interface EvaluatePredictionOutcome {
   prediction: Awaited<ReturnType<PredictionsService['findById']>>;
   result: PredictionResult | null;
   alreadyEvaluated: boolean;
+  reason?: string;
 }
 
 export class SkipEvaluationError extends Error {
@@ -73,6 +74,8 @@ export class SkipEvaluationError extends Error {
 @Injectable()
 export class PredictionsService {
   private readonly logger = new Logger(PredictionsService.name);
+  private readonly evaluatingPredictionIds = new Set<string>();
+  private isEvaluateDueRunning = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -158,6 +161,27 @@ export class PredictionsService {
   }
 
   async evaluateDuePredictions(): Promise<EvaluateDueSummary> {
+    if (this.isEvaluateDueRunning) {
+      return {
+        dueCandidatesCount: 0,
+        evaluated: 0,
+        success: 0,
+        failed: 0,
+        skipped: [{ reason: 'evaluation_already_running' }],
+        errors: [],
+        evaluatedIds: [],
+      };
+    }
+
+    this.isEvaluateDueRunning = true;
+    try {
+      return await this.runEvaluateDuePredictions();
+    } finally {
+      this.isEvaluateDueRunning = false;
+    }
+  }
+
+  private async runEvaluateDuePredictions(): Promise<EvaluateDueSummary> {
     const now = new Date();
     const due = await this.prisma.prediction.findMany({
       where: this.duePredictionWhere(now),
@@ -182,7 +206,7 @@ export class PredictionsService {
         if (outcome.alreadyEvaluated) {
           summary.skipped.push({
             id: prediction.id,
-            reason: 'already_evaluated',
+            reason: outcome.reason ?? 'already_evaluated',
           });
           continue;
         }
@@ -243,12 +267,35 @@ export class PredictionsService {
     predictionId: string,
     priceAfter?: number,
   ): Promise<EvaluatePredictionOutcome> {
+    if (this.evaluatingPredictionIds.has(predictionId)) {
+      const prediction = await this.findById(predictionId);
+      return {
+        prediction,
+        result: prediction.result,
+        alreadyEvaluated: true,
+        reason: 'already_evaluating',
+      };
+    }
+
+    this.evaluatingPredictionIds.add(predictionId);
+    try {
+      return await this.runEvaluatePrediction(predictionId, priceAfter);
+    } finally {
+      this.evaluatingPredictionIds.delete(predictionId);
+    }
+  }
+
+  private async runEvaluatePrediction(
+    predictionId: string,
+    priceAfter?: number,
+  ): Promise<EvaluatePredictionOutcome> {
     const prediction = await this.findById(predictionId);
     if (prediction.result)
       return {
         prediction,
         result: prediction.result,
         alreadyEvaluated: true,
+        reason: 'already_evaluated',
       };
 
     const baselineOutcome = await this.resolveEvaluationBaseline(prediction);
@@ -279,39 +326,94 @@ export class PredictionsService {
       ? PredictionStatus.SUCCESS
       : PredictionStatus.FAILED;
 
+    let racedToExisting = false;
     const result = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.predictionResult.create({
-        data: {
-          predictionId: prediction.id,
-          priceBefore: baseline,
-          priceAfter: resolvedPriceAfter,
-          actualMovePercent: score.actualMovePercent,
-          isSuccess: score.isSuccess,
-          directionCorrect: score.directionCorrect,
-          moveAccuracyPercent: score.moveAccuracyPercent,
-          finalScore: score.finalScore,
-          baselineSource,
-          explanation: buildEvaluationExplanation(
-            prediction.direction,
-            baseline,
-            resolvedPriceAfter,
-            score,
+      const existingResult = await tx.predictionResult.findUnique({
+        where: { predictionId: prediction.id },
+      });
+      if (existingResult) {
+        racedToExisting = true;
+        await tx.prediction.update({
+          where: { id: prediction.id },
+          data: {
+            status: existingResult.isSuccess
+              ? PredictionStatus.SUCCESS
+              : PredictionStatus.FAILED,
+            priceAtEventStart,
+            priceAtEventEnd: existingResult.priceAfter,
+          },
+        });
+        return existingResult;
+      }
+
+      try {
+        const created = await tx.predictionResult.create({
+          data: {
+            predictionId: prediction.id,
+            priceBefore: baseline,
+            priceAfter: resolvedPriceAfter,
+            actualMovePercent: score.actualMovePercent,
+            isSuccess: score.isSuccess,
+            directionCorrect: score.directionCorrect,
+            moveAccuracyPercent: score.moveAccuracyPercent,
+            finalScore: score.finalScore,
             baselineSource,
-            score.isSuccess,
-          ),
-          evaluatedAt: new Date(),
-        },
-      });
-      await tx.prediction.update({
-        where: { id: prediction.id },
-        data: {
-          status,
-          priceAtEventStart,
-          priceAtEventEnd: resolvedPriceAfter,
-        },
-      });
-      return created;
+            explanation: buildEvaluationExplanation(
+              prediction.direction,
+              baseline,
+              resolvedPriceAfter,
+              score,
+              baselineSource,
+              score.isSuccess,
+            ),
+            evaluatedAt: new Date(),
+          },
+        });
+        await tx.prediction.update({
+          where: { id: prediction.id },
+          data: {
+            status,
+            priceAtEventStart,
+            priceAtEventEnd: resolvedPriceAfter,
+          },
+        });
+        return created;
+      } catch (error) {
+        if (
+          error instanceof PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          const raced = await tx.predictionResult.findUnique({
+            where: { predictionId: prediction.id },
+          });
+          if (raced) {
+            racedToExisting = true;
+            await tx.prediction.update({
+              where: { id: prediction.id },
+              data: {
+                status: raced.isSuccess
+                  ? PredictionStatus.SUCCESS
+                  : PredictionStatus.FAILED,
+                priceAtEventStart,
+                priceAtEventEnd: raced.priceAfter,
+              },
+            });
+            return raced;
+          }
+        }
+        throw error;
+      }
     });
+
+    if (racedToExisting) {
+      const updated = await this.findById(predictionId);
+      return {
+        prediction: updated,
+        result,
+        alreadyEvaluated: true,
+        reason: 'already_evaluated',
+      };
+    }
 
     this.logger.log(
       `Prediction evaluated: ${JSON.stringify({
@@ -586,7 +688,7 @@ export class PredictionsService {
         if (outcome.alreadyEvaluated) {
           summary.skipped.push({
             id: prediction.id,
-            reason: 'already_evaluated',
+            reason: outcome.reason ?? 'already_evaluated',
           });
           continue;
         }

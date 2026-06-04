@@ -17,6 +17,7 @@ import { ServerLogsService } from '../server-logs/server-logs.service';
 export class SchedulerService implements OnModuleInit {
   private readonly logger = new Logger(SchedulerService.name);
   private startupRan = false;
+  private isPredictionEvaluationJobRunning = false;
 
   constructor(
     private readonly newsService: NewsService,
@@ -151,12 +152,20 @@ export class SchedulerService implements OnModuleInit {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handleDuePredictionEvaluation(): Promise<void> {
-    await this.serverLogs.info(
-      SERVER_LOG_TYPES.PREDICTION_EVALUATION,
-      'Due prediction evaluation started',
-    );
+    if (this.isPredictionEvaluationJobRunning) {
+      this.logger.warn(
+        'Due prediction evaluation skipped — previous run still in progress',
+      );
+      return;
+    }
 
+    this.isPredictionEvaluationJobRunning = true;
     try {
+      await this.serverLogs.info(
+        SERVER_LOG_TYPES.PREDICTION_EVALUATION,
+        'Due prediction evaluation started',
+      );
+
       const summary = await this.predictionsService.evaluateDuePredictions();
 
       await this.serverLogs.info(
@@ -173,7 +182,9 @@ export class SchedulerService implements OnModuleInit {
           `Evaluated prediction ids: ${summary.evaluatedIds.join(', ')}`,
         );
       for (const skip of summary.skipped)
-        this.logger.warn(`Skipped prediction ${skip.id}: ${skip.reason}`);
+        this.logger.warn(
+          `Skipped prediction ${skip.id ?? 'batch'}: ${skip.reason}`,
+        );
       for (const err of summary.errors)
         this.logger.error(`Evaluation error for ${err.id}: ${err.error}`);
     } catch (error) {
@@ -184,6 +195,8 @@ export class SchedulerService implements OnModuleInit {
         `Due prediction evaluation failed: ${message}`,
       );
       this.logger.error('Due prediction evaluation failed', error);
+    } finally {
+      this.isPredictionEvaluationJobRunning = false;
     }
   }
 }
