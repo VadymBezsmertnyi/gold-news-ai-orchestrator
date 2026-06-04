@@ -40,6 +40,15 @@ enum AgentRunStatus {
 model NewsItem {
   id              String             @id @default(cuid())
   externalId      String?            @unique
+  idApi           String?            @unique
+  dateline        Int?
+  eventStartAt    DateTime?
+  eventEndAt      DateTime?
+  impactValue     Int?
+  forecast        String?
+  previous        String?
+  eventTime       String?
+  eventDate       String?
   source          String
   title           String
   url             String?
@@ -59,6 +68,7 @@ model NewsItem {
   predictions Prediction[]
 
   @@index([analysisStatus])
+  @@index([eventStartAt])
 }
 
 model MarketContextAnalysis {
@@ -86,6 +96,10 @@ model Prediction {
   status              PredictionStatus     @default(PENDING)
   sourceType          PredictionSourceType @default(SINGLE_NEWS)
   priceAtPrediction   Float?
+  eventStartAt        DateTime?
+  eventEndAt          DateTime?
+  priceAtEventStart   Float?
+  priceAtEventEnd     Float?
   checkAfter          DateTime
   validFrom           DateTime?
   validUntil          DateTime?
@@ -103,6 +117,7 @@ model Prediction {
   @@index([newsItemId])
   @@index([globalContextId])
   @@index([sourceType])
+  @@index([eventEndAt])
 }
 
 model AgentRun {
@@ -130,15 +145,19 @@ model MarketPriceSnapshot {
 }
 
 model PredictionResult {
-  id                String   @id @default(cuid())
-  predictionId      String   @unique
-  priceBefore       Float
-  priceAfter        Float
-  actualMovePercent Float
-  isSuccess         Boolean
-  explanation       String?
-  evaluatedAt       DateTime
-  createdAt         DateTime @default(now())
+  id                  String   @id @default(cuid())
+  predictionId        String   @unique
+  priceBefore         Float
+  priceAfter          Float
+  actualMovePercent   Float
+  isSuccess           Boolean
+  directionCorrect    Boolean?
+  moveAccuracyPercent Float?
+  finalScore          Float?
+  baselineSource      String?
+  explanation         String?
+  evaluatedAt         DateTime
+  createdAt           DateTime @default(now())
 
   prediction Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade)
 }

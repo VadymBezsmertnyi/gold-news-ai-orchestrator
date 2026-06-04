@@ -36,13 +36,18 @@ export interface DashboardPredictionRow {
   timeframeMinutes: number;
   status: string;
   isOverdue: boolean;
+  eventStartAt: string | null;
+  eventEndAt: string | null;
   priceAtPrediction: number | null;
+  priceAtEventStart: number | null;
   currentLivePrice: number | null;
-  deltaPercent: number | null;
-  expectedResult: "SUCCESS" | "FAILED" | null;
+  actualMovePercent: number | null;
+  moveAccuracyPercent: number | null;
+  finalScore: number | null;
+  directionCorrect: boolean | null;
+  isPreview: boolean;
+  previewOutcome: "SUCCESS" | "FAILED" | null;
   checkAfter: string;
-  priceBefore: number | null;
-  priceAfter: number | null;
   result: string | null;
 }
 

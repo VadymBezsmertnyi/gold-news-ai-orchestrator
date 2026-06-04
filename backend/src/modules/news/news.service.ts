@@ -21,7 +21,7 @@ export class NewsService {
 
   async findAll(limit = 50): Promise<NewsItem[]> {
     return this.prisma.newsItem.findMany({
-      orderBy: { publishedAt: 'desc' },
+      orderBy: { eventStartAt: 'desc' },
       take: limit,
     });
   }
@@ -32,7 +32,6 @@ export class NewsService {
     return item;
   }
 
-  /** Used by scheduler and POST /news/sync — idempotent, no duplicates. */
   async syncNews(): Promise<SyncNewsResult> {
     return this.syncFromForexFactory();
   }
@@ -47,12 +46,15 @@ export class NewsService {
       const externalId = this.resolveExternalId(
         mapped.source,
         mapped.title,
-        mapped.publishedAt,
+        mapped.eventStartAt,
         event,
       );
 
-      const existing = await this.prisma.newsItem.findUnique({
-        where: { externalId },
+      const idApi = mapped.idApi ?? undefined;
+      const existing = await this.prisma.newsItem.findFirst({
+        where: {
+          OR: [{ externalId }, ...(idApi ? [{ idApi }] : [])],
+        },
       });
       if (existing) {
         skipped++;
@@ -76,11 +78,12 @@ export class NewsService {
   async createMockNews(): Promise<NewsItem> {
     const now = new Date();
     const title = 'Mock: US CPI beats expectations — gold volatility expected';
+    const dateline = Math.floor(now.getTime() / 1000);
     const externalId = this.resolveExternalId('mock', title, now, {
       idApi: `mock-${Date.now()}`,
       title,
       impact_value: 0,
-      dateline: Math.floor(now.getTime() / 1000),
+      dateline,
     });
 
     const existing = await this.prisma.newsItem.findUnique({
@@ -91,6 +94,9 @@ export class NewsService {
     return this.prisma.newsItem.create({
       data: {
         externalId,
+        idApi: `mock-${dateline}`,
+        dateline,
+        eventStartAt: now,
         source: 'mock',
         title,
         url: 'https://example.com/mock-gold-news',
@@ -114,20 +120,21 @@ export class NewsService {
   async findPendingAnalysis(limit = 5): Promise<NewsItem[]> {
     return this.prisma.newsItem.findMany({
       where: { analysisStatus: NewsAnalysisStatus.PENDING },
-      orderBy: { publishedAt: 'desc' },
+      orderBy: { eventStartAt: 'desc' },
       take: limit,
     });
   }
 
   async findRecentForDashboard(limit = 10) {
     return this.prisma.newsItem.findMany({
-      orderBy: { publishedAt: 'desc' },
+      orderBy: { eventStartAt: 'desc' },
       take: limit,
       select: {
         id: true,
         title: true,
         source: true,
         publishedAt: true,
+        eventStartAt: true,
         analysisStatus: true,
         category: true,
         impactLevel: true,
@@ -141,7 +148,7 @@ export class NewsService {
   resolveExternalId(
     source: string,
     title: string,
-    publishedAt: Date,
+    eventStartAt: Date,
     event?: ForexFactoryNewsEvent,
   ): string {
     const rawId = event?.idApi ?? event?.id;
@@ -153,31 +160,45 @@ export class NewsService {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '_')
       .slice(0, 120);
-    return `${source}:${publishedAt.toISOString()}:${slug}`;
+    return `${source}:${eventStartAt.toISOString()}:${slug}`;
   }
 
   private mapForexFactoryEvent(event: ForexFactoryNewsEvent): Omit<
     Prisma.NewsItemCreateInput,
     'externalId'
   > & {
-    publishedAt: Date;
+    eventStartAt: Date;
     source: string;
     title: string;
   } {
-    const publishedAt = new Date(event.dateline * 1000);
+    const eventStartAt = new Date(event.dateline * 1000);
+    const idApi =
+      event.idApi != null && String(event.idApi).trim() !== ''
+        ? String(event.idApi).trim()
+        : undefined;
     const summaryParts = [
       event.country ? `country: ${event.country}` : null,
-      event.impact ? `impact: ${event.impact}` : null,
+      (event.impact_name ?? event.impact)
+        ? `impact: ${event.impact_name ?? event.impact}`
+        : null,
       event.forecast ? `forecast: ${event.forecast}` : null,
       event.previous ? `previous: ${event.previous}` : null,
     ].filter(Boolean);
 
     return {
+      idApi,
+      dateline: event.dateline,
+      eventStartAt,
+      impactValue: event.impact_value,
+      forecast: event.forecast ?? undefined,
+      previous: event.previous ?? undefined,
+      eventTime: event.time ?? undefined,
+      eventDate: event.date ?? undefined,
       source: NEWS_SOURCE_FOREX_FACTORY,
       title: event.title,
       url: event.details_url,
       summary: summaryParts.length > 0 ? summaryParts.join(' | ') : undefined,
-      publishedAt,
+      publishedAt: eventStartAt,
       analysisStatus: NewsAnalysisStatus.PENDING,
       rawPayload: event as unknown as Prisma.InputJsonValue,
     };

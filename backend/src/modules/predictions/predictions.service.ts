@@ -15,10 +15,17 @@ import {
 
 // common
 import { PrismaService } from '../../common/prisma/prisma.service';
+import { XAUUSD_SYMBOL } from '../../constants';
 
 // modules
 import { MarketService } from '../market/market.service';
 import { NewsService } from '../news/news.service';
+import {
+  buildEvaluationExplanation,
+  computePredictionScore,
+  resolveEventStartAt,
+  type BaselineSource,
+} from './prediction-evaluation.util';
 import {
   PREDICTION_EVALUATION_HANDLER,
   type PredictionEvaluationHandler,
@@ -106,7 +113,9 @@ export class PredictionsService {
       return this.findActiveSingleNewsPrediction(newsItemId);
 
     const price = await this.marketService.getCurrentXauusd();
-    const checkAfter = new Date();
+    const news = await this.newsService.findById(newsItemId);
+    const eventStartAt = news.eventStartAt ?? news.publishedAt;
+    const eventEndAt = new Date(eventStartAt.getTime() + 60 * 60 * 1000);
 
     return this.prisma.prediction.create({
       data: {
@@ -119,7 +128,12 @@ export class PredictionsService {
           'Mock prediction for learning pipeline — replace with agent orchestration later.',
         status: PredictionStatus.PENDING,
         priceAtPrediction: price.price,
-        checkAfter,
+        eventStartAt,
+        eventEndAt,
+        checkAfter: eventEndAt,
+        validFrom: eventStartAt,
+        validUntil: eventEndAt,
+        expiresAt: eventEndAt,
         sourceType: PredictionSourceType.SINGLE_NEWS,
       },
       include: { newsItem: true },
@@ -212,29 +226,19 @@ export class PredictionsService {
         alreadyEvaluated: true,
       };
 
-    let priceBefore = prediction.priceAtPrediction;
-    if (priceBefore == null) {
-      const snapshot = await this.marketService.captureSnapshot();
-      priceBefore = snapshot.price;
-      await this.prisma.prediction.update({
-        where: { id: prediction.id },
-        data: { priceAtPrediction: priceBefore },
-      });
-    }
+    const { baseline, baselineSource, priceAtEventStart } =
+      await this.resolveEvaluationBaseline(prediction);
 
     const resolvedPriceAfter =
       priceAfter ?? (await this.marketService.getCurrentXauusd()).price;
-    const actualMovePercent =
-      priceBefore === 0
-        ? 0
-        : ((resolvedPriceAfter - priceBefore) / priceBefore) * 100;
-    const isSuccess = this.isPredictionSuccessful(
+
+    const score = computePredictionScore(
       prediction.direction,
-      priceBefore,
+      baseline,
       resolvedPriceAfter,
-      actualMovePercent,
+      prediction.expectedMovePercent,
     );
-    const status = isSuccess
+    const status = score.isSuccess
       ? PredictionStatus.SUCCESS
       : PredictionStatus.FAILED;
 
@@ -242,26 +246,55 @@ export class PredictionsService {
       const created = await tx.predictionResult.create({
         data: {
           predictionId: prediction.id,
-          priceBefore,
+          priceBefore: baseline,
           priceAfter: resolvedPriceAfter,
-          actualMovePercent,
-          isSuccess,
-          explanation: this.buildEvaluationExplanation(
+          actualMovePercent: score.actualMovePercent,
+          isSuccess: score.isSuccess,
+          directionCorrect: score.directionCorrect,
+          moveAccuracyPercent: score.moveAccuracyPercent,
+          finalScore: score.finalScore,
+          baselineSource,
+          explanation: buildEvaluationExplanation(
             prediction.direction,
-            priceBefore,
+            baseline,
             resolvedPriceAfter,
-            actualMovePercent,
-            isSuccess,
+            score,
+            baselineSource,
+            score.isSuccess,
           ),
           evaluatedAt: new Date(),
         },
       });
       await tx.prediction.update({
         where: { id: prediction.id },
-        data: { status },
+        data: {
+          status,
+          priceAtEventStart,
+          priceAtEventEnd: resolvedPriceAfter,
+        },
       });
       return created;
     });
+
+    this.logger.log(
+      `Prediction evaluated: ${JSON.stringify({
+        predictionId: prediction.id,
+        sourceType: prediction.sourceType,
+        eventStartAt:
+          prediction.eventStartAt ?? resolveEventStartAt(prediction),
+        eventEndAt: prediction.eventEndAt ?? prediction.checkAfter,
+        baselineSource,
+        priceAtPrediction: prediction.priceAtPrediction,
+        priceAtEventStart,
+        priceAfter: resolvedPriceAfter,
+        actualMovePercent: score.actualMovePercent,
+        expectedMovePercent: prediction.expectedMovePercent,
+        moveAccuracyPercent: score.moveAccuracyPercent,
+        finalScore: score.finalScore,
+        directionCorrect: score.directionCorrect,
+        status,
+      })}`,
+    );
 
     const updated = await this.findById(predictionId);
     if (this.evaluationHandler)
@@ -291,19 +324,105 @@ export class PredictionsService {
 
   previewEvaluationOutcome(
     direction: PredictionDirection,
-    priceBefore: number,
+    baseline: number,
     priceAfter: number,
+    expectedMovePercent: number | null,
   ): 'SUCCESS' | 'FAILED' {
-    const actualMovePercent =
-      priceBefore === 0 ? 0 : ((priceAfter - priceBefore) / priceBefore) * 100;
-    return this.isPredictionSuccessful(
+    return computePredictionScore(
       direction,
-      priceBefore,
+      baseline,
       priceAfter,
-      actualMovePercent,
-    )
+      expectedMovePercent,
+    ).isSuccess
       ? 'SUCCESS'
       : 'FAILED';
+  }
+
+  computeDashboardMetrics(
+    prediction: Awaited<
+      ReturnType<PredictionsService['findRecentForDashboard']>
+    >[number],
+    livePrice: number | null,
+  ) {
+    const baseline =
+      prediction.priceAtEventStart ??
+      prediction.result?.priceBefore ??
+      prediction.priceAtPrediction;
+    const priceAfter =
+      prediction.result?.priceAfter ?? prediction.priceAtEventEnd ?? livePrice;
+    if (baseline == null || priceAfter == null) return null;
+
+    const score = computePredictionScore(
+      prediction.direction,
+      baseline,
+      priceAfter,
+      prediction.expectedMovePercent,
+    );
+    const isPending =
+      prediction.status === PredictionStatus.PENDING && !prediction.result;
+
+    return {
+      baseline,
+      priceAfter,
+      signedDeltaPercent: score.signedMovePercent,
+      actualMovePercent: score.actualMovePercent,
+      moveAccuracyPercent: score.moveAccuracyPercent,
+      finalScore: score.finalScore,
+      directionCorrect: score.directionCorrect,
+      isPreview: isPending,
+      previewOutcome: isPending
+        ? score.isSuccess
+          ? 'SUCCESS'
+          : 'FAILED'
+        : null,
+      baselineSource: prediction.result?.baselineSource ?? null,
+    };
+  }
+
+  private async resolveEvaluationBaseline(
+    prediction: Awaited<ReturnType<PredictionsService['findById']>>,
+  ): Promise<{
+    baseline: number;
+    baselineSource: BaselineSource;
+    priceAtEventStart: number;
+  }> {
+    if (prediction.priceAtEventStart != null)
+      return {
+        baseline: prediction.priceAtEventStart,
+        baselineSource: 'priceAtEventStart',
+        priceAtEventStart: prediction.priceAtEventStart,
+      };
+
+    const eventStartAt = resolveEventStartAt(prediction);
+    const snap = await this.marketService.findNearestSnapshot(
+      XAUUSD_SYMBOL,
+      eventStartAt,
+      prediction.priceAtPrediction,
+    );
+
+    if (
+      snap.source === 'snapshot_before' ||
+      snap.source === 'snapshot_after' ||
+      snap.source === 'fallback_current'
+    )
+      return {
+        baseline: snap.price,
+        baselineSource: snap.source,
+        priceAtEventStart: snap.price,
+      };
+
+    if (prediction.priceAtPrediction != null)
+      return {
+        baseline: prediction.priceAtPrediction,
+        baselineSource: 'priceAtPrediction',
+        priceAtEventStart: prediction.priceAtPrediction,
+      };
+
+    return {
+      baseline: snap.price,
+      baselineSource: snap.source,
+      priceAtEventStart: snap.price,
+    };
   }
 
   async findRecentForDashboard(limit = 15) {
@@ -410,29 +529,5 @@ export class PredictionsService {
     }
 
     return summary;
-  }
-
-  private isPredictionSuccessful(
-    direction: PredictionDirection,
-    priceBefore: number,
-    priceAfter: number,
-    actualMovePercent: number,
-  ): boolean {
-    if (direction === PredictionDirection.NEUTRAL)
-      return Math.abs(actualMovePercent) <= 0.1;
-    if (direction === PredictionDirection.BUY) return priceAfter > priceBefore;
-    if (direction === PredictionDirection.SELL) return priceAfter < priceBefore;
-    return false;
-  }
-
-  private buildEvaluationExplanation(
-    direction: PredictionDirection,
-    priceBefore: number,
-    priceAfter: number,
-    actualMovePercent: number,
-    isSuccess: boolean,
-  ): string {
-    const outcome = isSuccess ? 'SUCCESS' : 'FAILED';
-    return `${outcome}: ${direction} — ${priceBefore.toFixed(2)} → ${priceAfter.toFixed(2)} (${actualMovePercent.toFixed(3)}% move).`;
   }
 }

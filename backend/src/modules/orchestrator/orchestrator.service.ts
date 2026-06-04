@@ -41,13 +41,18 @@ export interface DashboardPredictionRow {
   timeframeMinutes: number;
   status: string;
   isOverdue: boolean;
+  eventStartAt: Date | null;
+  eventEndAt: Date | null;
   priceAtPrediction: number | null;
+  priceAtEventStart: number | null;
   currentLivePrice: number | null;
-  deltaPercent: number | null;
-  expectedResult: 'SUCCESS' | 'FAILED' | null;
+  actualMovePercent: number | null;
+  moveAccuracyPercent: number | null;
+  finalScore: number | null;
+  directionCorrect: boolean | null;
+  isPreview: boolean;
+  previewOutcome: 'SUCCESS' | 'FAILED' | null;
   checkAfter: Date;
-  priceBefore: number | null;
-  priceAfter: number | null;
   result: string | null;
 }
 
@@ -240,23 +245,14 @@ export class OrchestratorService {
       },
       recentPredictions: recentPredictions.map((p) => {
         const now = new Date();
-        const entry = p.priceAtPrediction;
-        const current = p.result?.priceAfter ?? livePrice;
+        const metrics = this.predictionsService.computeDashboardMetrics(
+          p,
+          livePrice,
+        );
         const isOverdue =
           p.status === PredictionStatus.PENDING &&
           !p.result &&
           p.checkAfter <= now;
-        let deltaPercent: number | null = null;
-        let expectedResult: 'SUCCESS' | 'FAILED' | null = null;
-        if (entry != null && current != null) {
-          deltaPercent = entry === 0 ? 0 : ((current - entry) / entry) * 100;
-          if (!p.result)
-            expectedResult = this.predictionsService.previewEvaluationOutcome(
-              p.direction,
-              entry,
-              current,
-            );
-        }
 
         return {
           id: p.id,
@@ -271,13 +267,23 @@ export class OrchestratorService {
           timeframeMinutes: p.timeframeMinutes,
           status: p.status,
           isOverdue,
-          priceAtPrediction: entry,
-          currentLivePrice: current,
-          deltaPercent,
-          expectedResult,
+          eventStartAt: p.eventStartAt ?? p.newsItem?.eventStartAt ?? null,
+          eventEndAt: p.eventEndAt ?? p.checkAfter,
+          priceAtPrediction: p.priceAtPrediction,
+          priceAtEventStart: metrics?.baseline ?? p.priceAtEventStart ?? null,
+          currentLivePrice: metrics?.priceAfter ?? livePrice,
+          actualMovePercent: metrics?.actualMovePercent ?? null,
+          moveAccuracyPercent: metrics?.moveAccuracyPercent ?? null,
+          finalScore: p.result?.finalScore ?? metrics?.finalScore ?? null,
+          directionCorrect:
+            p.result?.directionCorrect ?? metrics?.directionCorrect ?? null,
+          isPreview: metrics?.isPreview ?? false,
+          previewOutcome:
+            metrics?.previewOutcome === 'SUCCESS' ||
+            metrics?.previewOutcome === 'FAILED'
+              ? metrics.previewOutcome
+              : null,
           checkAfter: p.checkAfter,
-          priceBefore: p.result?.priceBefore ?? entry,
-          priceAfter: p.result?.priceAfter ?? null,
           result: p.result ? (p.result.isSuccess ? 'SUCCESS' : 'FAILED') : null,
         };
       }),
@@ -433,9 +439,10 @@ export class OrchestratorService {
           continue;
         }
 
-        const now = new Date();
-        const checkAfter = new Date(
-          now.getTime() + predictionOutput.timeframeMinutes * 60 * 1000,
+        const eventStartAt = newsItem.eventStartAt ?? newsItem.publishedAt;
+        const eventEndAt = new Date(
+          eventStartAt.getTime() +
+            predictionOutput.timeframeMinutes * 60 * 1000,
         );
 
         await this.prisma.prediction.create({
@@ -448,11 +455,13 @@ export class OrchestratorService {
             reason: predictionOutput.reason,
             status: PredictionStatus.PENDING,
             priceAtPrediction: currentPrice.price,
-            checkAfter,
+            eventStartAt,
+            eventEndAt,
+            checkAfter: eventEndAt,
             sourceType: PredictionSourceType.SINGLE_NEWS,
-            validFrom: now,
-            validUntil: checkAfter,
-            expiresAt: checkAfter,
+            validFrom: eventStartAt,
+            validUntil: eventEndAt,
+            expiresAt: eventEndAt,
           },
         });
         summary.predictionsCreated++;

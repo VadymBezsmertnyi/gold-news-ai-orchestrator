@@ -26,16 +26,24 @@ export const PREDICTION_HEADERS = {
   source: "Джерело",
   direction: "Напрям",
   confidence: "Впевненість",
-  move: "Очікуваний рух",
-  tf: "TF",
-  entry: "Ціна входу",
-  current: "Поточна",
-  check: "Перевірка",
+  pricePrediction: "Ціна прогнозу",
+  priceEventStart: "Ціна старту новини",
+  current: "Поточна/фінальна",
+  actualMove: "Факт Δ %",
+  expectedMove: "Очікуваний рух %",
+  accuracy: "Оцінка %",
+  directionOk: "Напрям вгадано",
+  eventStart: "Старт новини",
+  eventEnd: "Кінець перевірки",
   status: "Статус",
-  delta: "Δ %",
-  expected: "Очікуваний результат",
-  result: "Результат",
+  preview: "Попередня оцінка",
+  result: "Фінальний результат",
 } as const;
+
+export function translateDirectionCorrect(value: boolean | null): string {
+  if (value == null) return "—";
+  return value ? "Так" : "Ні";
+}
 
 export const NEWS_HEADERS = {
   title: "Заголовок",
