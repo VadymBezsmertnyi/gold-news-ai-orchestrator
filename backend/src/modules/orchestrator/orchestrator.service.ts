@@ -12,6 +12,7 @@ import { PredictionsService } from '../predictions/predictions.service';
 
 // agents
 import { NewsClassifierAgent } from '../ai/agents/news-classifier.agent';
+import { SingleNewsImpactAgent } from '../ai/agents/single-news-impact.agent';
 
 export interface DashboardPredictionRow {
   id: string;
@@ -75,6 +76,7 @@ export class OrchestratorService {
     private readonly learningService: LearningService,
     private readonly agentsService: AgentsService,
     private readonly newsClassifierAgent: NewsClassifierAgent,
+    private readonly singleNewsImpactAgent: SingleNewsImpactAgent,
   ) {}
 
   async getDashboard(): Promise<DashboardResponse> {
@@ -155,14 +157,27 @@ export class OrchestratorService {
           publishedAt: newsItem.publishedAt,
         });
 
+        const impactOutput = await this.singleNewsImpactAgent.run({
+          title: newsItem.title,
+          summary: output.summary,
+          category: output.category,
+          impactLevel: output.impactLevel,
+          source: newsItem.source,
+          publishedAt: newsItem.publishedAt,
+        });
+
         const updatedNewsItem = await this.prisma.newsItem.update({
-          where: {
-            id: newsItem.id,
-          },
+          where: { id: newsItem.id },
           data: {
             category: output.category,
             impactLevel: output.impactLevel,
-            analysisSummary: output.summary,
+            goldImpact: impactOutput.goldImpact,
+            analysisSummary: `
+              ${output.summary}
+
+              Impact Reason:
+              ${impactOutput.impactReason}
+              `.trim(),
             analysisStatus: 'ANALYZED',
             analyzedAt: new Date(),
             analysisError: null,
@@ -174,6 +189,7 @@ export class OrchestratorService {
           title: updatedNewsItem.title,
           category: updatedNewsItem.category,
           impactLevel: updatedNewsItem.impactLevel,
+          goldImpact: updatedNewsItem.goldImpact,
         });
       } catch (error) {
         const message =
