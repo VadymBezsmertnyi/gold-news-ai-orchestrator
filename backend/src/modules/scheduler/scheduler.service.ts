@@ -35,7 +35,7 @@ export class SchedulerService {
         await this.orchestratorService.analyzePendingNewsPlaceholder();
       if (result.count > 0)
         this.logger.log(
-          `Pending news analysis placeholder: count=${result.count} ids=${result.ids.join(', ')}`,
+          `Pending news analysis placeholder: count=${result.count} ids=${result.results.map((r) => r.id).join(', ')}`,
         );
     } catch (error) {
       this.logger.error('Pending news analysis hook failed', error);
