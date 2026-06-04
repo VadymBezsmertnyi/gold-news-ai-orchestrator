@@ -65,6 +65,9 @@ export interface SourceFetchSlice {
 
 export interface ForexFactoryFetchResult {
   timeWindow: SyncTimeWindow;
+  /** mds-api breaking news feed (primary when calendar 403). */
+  mdsApiUrl: string;
+  /** www calendar/upcoming (optional). */
   indicatorsUrl: string;
   newsUrl: string;
   newsApiStatus: ForexFactoryApiStatus;
@@ -106,6 +109,8 @@ export interface NewsDebugSourceResult {
   syncFutureHours: number;
   newsApiStatus: ForexFactoryApiStatus;
   newsApiUrl: string;
+  mdsApiUrl: string;
+  mdsApiStatus: ForexFactoryApiStatus;
   indicatorsApiUrl: string;
   newsRawCount: number;
   newsFallbackCount: number;

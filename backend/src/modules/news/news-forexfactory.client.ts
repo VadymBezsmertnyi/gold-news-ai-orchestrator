@@ -4,7 +4,9 @@ import axios, { type AxiosInstance } from 'axios';
 // local
 import {
   FF_BASE_URL,
-  NEWS_API_URL,
+  FF_MDS_BASE_URL,
+  FOREX_FACTORY_HTTP_HEADERS,
+  NEWS_CALENDAR_API_URL,
   NEWS_SOURCE_FOREX_FACTORY_INDICATOR,
   NEWS_SOURCE_FOREX_FACTORY_NEWS,
 } from './news-forexfactory.constants';
@@ -32,29 +34,59 @@ export interface ForexFactoryApiFetchResult {
 @Injectable()
 export class NewsForexFactoryClient {
   private readonly logger = new Logger(NewsForexFactoryClient.name);
-  private readonly http: AxiosInstance = axios.create({
+
+  /** www.forexfactory.com (calendar upcoming). */
+  private readonly wwwHttp: AxiosInstance = axios.create({
     timeout: 15_000,
     headers: {
-      Accept: 'application/json, text/plain, */*',
-      'User-Agent':
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
-      Referer: FF_BASE_URL,
+      ...FOREX_FACTORY_HTTP_HEADERS,
+      'Sec-Fetch-Site': 'same-origin',
     },
   });
 
-  getNewsApiUrl(): string {
-    return NEWS_API_URL;
+  /** mds-api.forexfactory.com (breaking news feed — works when www calendar is 403). */
+  private readonly mdsHttp: AxiosInstance = axios.create({
+    timeout: 15_000,
+    headers: {
+      ...FOREX_FACTORY_HTTP_HEADERS,
+      'Sec-Fetch-Site': 'same-site',
+    },
+  });
+
+  getNewsCalendarApiUrl(): string {
+    return NEWS_CALENDAR_API_URL;
   }
 
-  /** Same as XauSync `getIndicatorsApiUrl`. */
+  /** @deprecated */
+  getNewsApiUrl(): string {
+    return this.getNewsCalendarApiUrl();
+  }
+
+  /**
+   * XauSync `getIndicatorsApiUrl` — mds-api breaking news + calendar items for Gold.
+   * Despite the path name, `/news/{id}` URLs are regular headlines (not calendar).
+   */
   getIndicatorsApiUrl(fromDate?: Date, toDate?: Date): string {
     const now = toDate ?? new Date();
     const from = fromDate ?? new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const fromTimestamp = Math.floor(from.getTime() / 1000);
-    return `${FF_BASE_URL.replace(
-      'www',
-      'mds-api',
-    )}/indicators/news?instrument=Gold%2FUSD&interval=M15&from=${fromTimestamp}&site_id=1`;
+    return `${FF_MDS_BASE_URL}/indicators/news?instrument=Gold%2FUSD&interval=M15&from=${fromTimestamp}&site_id=1`;
+  }
+
+  getMdsApiUrl(fromDate?: Date, toDate?: Date): string {
+    return this.getIndicatorsApiUrl(fromDate, toDate);
+  }
+
+  /**
+   * mds-api items: `/news/` → breaking news; `/calendar/` → scheduled calendar.
+   */
+  classifyMdsEventType(url?: string): ForexFactorySourceType {
+    if (!url) return 'NEWS';
+    if (url.startsWith('/news/') || url.includes('/news/')) return 'NEWS';
+    if (url.startsWith('/calendar/') || url.includes('/calendar/')) {
+      return 'INDICATOR';
+    }
+    return 'NEWS';
   }
 
   getSyncTimeRange(now = new Date()): SyncTimeWindow & {
@@ -79,17 +111,18 @@ export class NewsForexFactoryClient {
   }
 
   /**
-   * XauSync: `fetchIndicatorsDataToNewsEvents` — scheduled calendar indicators.
+   * XauSync: `fetchIndicatorsDataToNewsEvents` — uses mds-api (not www calendar).
    */
   async fetchIndicatorsDataToNewsEvents(
     fromDate?: Date,
     toDate?: Date,
   ): Promise<ForexFactoryApiFetchResult> {
-    const url = this.getIndicatorsApiUrl(fromDate, toDate);
+    const url = this.getMdsApiUrl(fromDate, toDate);
     try {
-      const response = await this.http.get<IndicatorsApiResponse>(url);
-      const events: ForexFactoryNewsEvent[] = response.data.data.map(
-        (item) => ({
+      const response = await this.mdsHttp.get<IndicatorsApiResponse>(url);
+      const events: ForexFactoryNewsEvent[] = response.data.data.map((item) => {
+        const type = this.classifyMdsEventType(item.url);
+        return {
           idApi: item.id.toString(),
           title: item.title,
           impact_value: item.impact_value,
@@ -103,8 +136,15 @@ export class NewsForexFactoryClient {
           impact: item.impact,
           impact_name: item.impact,
           details_url: item.url ? `${FF_BASE_URL}${item.url}` : undefined,
-          forexFactoryType: 'INDICATOR' as const,
-        }),
+          forexFactoryType: type,
+        };
+      });
+      const newsCount = events.filter(
+        (e) => e.forexFactoryType === 'NEWS',
+      ).length;
+      const indicatorCount = events.length - newsCount;
+      this.logger.log(
+        `mds-api: ${events.length} events (news=${newsCount} calendar=${indicatorCount})`,
       );
       return { events, apiStatus: 'ok', apiUrl: url };
     } catch (error: unknown) {
@@ -113,22 +153,22 @@ export class NewsForexFactoryClient {
         : undefined;
       if (status === 403) {
         this.logger.warn(
-          `Forex Factory indicators API returned 403 — will use cached DB data. URL: ${url}`,
+          `Forex Factory mds-api returned 403 — will use cached DB data. URL: ${url}`,
         );
         return { events: [], apiStatus: 'forbidden', apiUrl: url };
       }
-      this.logger.error('Error fetching indicators data', error);
+      this.logger.error('Error fetching mds-api news data', error);
       return { events: [], apiStatus: 'error', apiUrl: url };
     }
   }
 
   /**
-   * XauSync: `fetchNewsEvents` — regular news headlines (calendar upcoming).
+   * XauSync: `fetchNewsEvents` — www calendar/upcoming (optional; often 403 server-side).
    */
   async fetchNewsEvents(): Promise<ForexFactoryApiFetchResult> {
-    const url = NEWS_API_URL;
+    const url = this.getNewsCalendarApiUrl();
     try {
-      const response = await this.http.get<NewsApiResponse>(url);
+      const response = await this.wwwHttp.get<NewsApiResponse>(url);
       const events: ForexFactoryNewsEvent[] = response.data.events.map(
         (event) => ({
           ...event,
@@ -148,11 +188,11 @@ export class NewsForexFactoryClient {
         : undefined;
       if (status === 403) {
         this.logger.warn(
-          `Forex Factory news API returned 403 — will use cached DB data. URL: ${url}`,
+          `Forex Factory calendar API returned 403 — regular news still available via mds-api. URL: ${url}`,
         );
         return { events: [], apiStatus: 'forbidden', apiUrl: url };
       }
-      this.logger.error('Error fetching news events', error);
+      this.logger.error('Error fetching calendar news events', error);
       return { events: [], apiStatus: 'error', apiUrl: url };
     }
   }
@@ -190,12 +230,6 @@ export class NewsForexFactoryClient {
     return sourceType === 'INDICATOR'
       ? NEWS_SOURCE_FOREX_FACTORY_INDICATOR
       : NEWS_SOURCE_FOREX_FACTORY_NEWS;
-  }
-
-  externalIdForEvent(event: ForexFactoryNewsEvent): string | null {
-    const rawId = this.resolveRawIdApi(event);
-    if (!rawId) return null;
-    return `${this.sourceForType(event.forexFactoryType)}:${rawId}`;
   }
 
   dedupeEvents(events: ForexFactoryNewsEvent[]): ForexFactoryNewsEvent[] {
@@ -254,28 +288,39 @@ export class NewsForexFactoryClient {
   }
 
   /**
-   * API-only fetch (no DB fallback). Service layer applies cache like XauSync index.ts.
+   * Split mds-api + calendar API into news vs calendar indicator streams (XauSync merge).
    */
   fetchMergedGoldNewsFromApi(
-    indicatorsApi: ForexFactoryApiFetchResult,
-    newsApi: ForexFactoryApiFetchResult,
+    mdsApi: ForexFactoryApiFetchResult,
+    calendarApi: ForexFactoryApiFetchResult,
     range: SyncTimeWindow & { fromDate: Date; toDate: Date },
-  ): Omit<
-    ForexFactoryFetchResult,
-    'events' | 'total' | 'impactBreakdown' | 'indicators' | 'news'
-  > & {
-    indicatorsRaw: ForexFactoryNewsEvent[];
+  ): {
+    timeWindow: SyncTimeWindow;
+    mdsApiUrl: string;
+    calendarApiUrl: string;
+    calendarApiStatus: ForexFactoryApiStatus;
+    mdsApiStatus: ForexFactoryApiStatus;
     newsRaw: ForexFactoryNewsEvent[];
-    indicatorsInWindow: ForexFactoryNewsEvent[];
+    indicatorsRaw: ForexFactoryNewsEvent[];
     newsInWindow: ForexFactoryNewsEvent[];
+    indicatorsInWindow: ForexFactoryNewsEvent[];
   } {
-    const indicatorsInWindow = this.filterByTimeWindow(
-      indicatorsApi.events,
+    const mdsNewsRaw = mdsApi.events.filter(
+      (e) => e.forexFactoryType === 'NEWS',
+    );
+    const mdsIndicatorsRaw = mdsApi.events.filter(
+      (e) => e.forexFactoryType === 'INDICATOR',
+    );
+    const newsRaw = [...calendarApi.events, ...mdsNewsRaw];
+    const indicatorsRaw = mdsIndicatorsRaw;
+
+    const newsInWindow = this.filterByTimeWindow(
+      newsRaw,
       range.fromSec,
       range.toSec,
     );
-    const newsInWindow = this.filterByTimeWindow(
-      newsApi.events,
+    const indicatorsInWindow = this.filterByTimeWindow(
+      indicatorsRaw,
       range.fromSec,
       range.toSec,
     );
@@ -287,70 +332,78 @@ export class NewsForexFactoryClient {
         fromSec: range.fromSec,
         toSec: range.toSec,
       },
-      indicatorsUrl: indicatorsApi.apiUrl,
-      newsUrl: newsApi.apiUrl,
-      newsApiStatus: newsApi.apiStatus,
-      indicatorsApiStatus: indicatorsApi.apiStatus,
-      indicatorsRaw: indicatorsApi.events,
-      newsRaw: newsApi.events,
-      indicatorsInWindow,
+      mdsApiUrl: mdsApi.apiUrl,
+      calendarApiUrl: calendarApi.apiUrl,
+      calendarApiStatus: calendarApi.apiStatus,
+      mdsApiStatus: mdsApi.apiStatus,
+      newsRaw,
+      indicatorsRaw,
       newsInWindow,
+      indicatorsInWindow,
     };
   }
 
   buildFetchResult(
     range: SyncTimeWindow,
-    indicatorsApi: {
+    calendarApi: {
       apiStatus: ForexFactoryApiStatus;
       apiUrl: string;
       raw: ForexFactoryNewsEvent[];
       inWindow: ForexFactoryNewsEvent[];
       fallbackCount: number;
     },
-    newsApi: {
+    mdsApi: {
       apiStatus: ForexFactoryApiStatus;
       apiUrl: string;
+    },
+    newsStream: {
+      raw: ForexFactoryNewsEvent[];
+      inWindow: ForexFactoryNewsEvent[];
+      fallbackCount: number;
+    },
+    indicatorsStream: {
       raw: ForexFactoryNewsEvent[];
       inWindow: ForexFactoryNewsEvent[];
       fallbackCount: number;
     },
   ): ForexFactoryFetchResult {
-    const indicatorsDeduped = this.dedupeEvents(indicatorsApi.inWindow);
-    const newsDeduped = this.dedupeEvents(newsApi.inWindow);
+    const indicatorsDeduped = this.dedupeEvents(indicatorsStream.inWindow);
+    const newsDeduped = this.dedupeEvents(newsStream.inWindow);
     const mergedInWindow = [
-      ...indicatorsApi.inWindow,
-      ...newsApi.inWindow,
+      ...indicatorsStream.inWindow,
+      ...newsStream.inWindow,
     ];
     const events = this.dedupeEvents(mergedInWindow);
 
     return {
       timeWindow: range,
-      indicatorsUrl: indicatorsApi.apiUrl,
-      newsUrl: newsApi.apiUrl,
-      newsApiStatus: newsApi.apiStatus,
-      indicatorsApiStatus: indicatorsApi.apiStatus,
+      indicatorsUrl: mdsApi.apiUrl,
+      newsUrl: calendarApi.apiUrl,
+      mdsApiUrl: mdsApi.apiUrl,
+      newsApiStatus: calendarApi.apiStatus,
+      indicatorsApiStatus: mdsApi.apiStatus,
       indicators: {
-        apiStatus: indicatorsApi.apiStatus,
-        apiUrl: indicatorsApi.apiUrl,
-        raw: indicatorsApi.raw.length,
-        afterWindow: indicatorsApi.inWindow.length,
+        apiStatus: mdsApi.apiStatus,
+        apiUrl: mdsApi.apiUrl,
+        raw: indicatorsStream.raw.length,
+        afterWindow: indicatorsStream.inWindow.length,
         afterDedup: indicatorsDeduped.length,
-        fallbackCount: indicatorsApi.fallbackCount,
+        fallbackCount: indicatorsStream.fallbackCount,
         events: indicatorsDeduped,
-        rawInWindow: indicatorsApi.inWindow,
+        rawInWindow: indicatorsStream.inWindow,
       },
       news: {
-        apiStatus: newsApi.apiStatus,
-        apiUrl: newsApi.apiUrl,
-        raw: newsApi.raw.length,
-        afterWindow: newsApi.inWindow.length,
+        apiStatus: calendarApi.apiStatus,
+        apiUrl: calendarApi.apiUrl,
+        raw: newsStream.raw.length,
+        afterWindow: newsStream.inWindow.length,
         afterDedup: newsDeduped.length,
-        fallbackCount: newsApi.fallbackCount,
+        fallbackCount: newsStream.fallbackCount,
         events: newsDeduped,
-        rawInWindow: newsApi.inWindow,
+        rawInWindow: newsStream.inWindow,
       },
       total: {
-        raw: indicatorsApi.raw.length + newsApi.raw.length,
+        raw: newsStream.raw.length + indicatorsStream.raw.length,
         afterWindow: mergedInWindow.length,
         afterDedup: events.length,
       },

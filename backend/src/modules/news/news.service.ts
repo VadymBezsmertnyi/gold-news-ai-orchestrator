@@ -62,10 +62,12 @@ export class NewsService {
   /**
    * XauSync parity: fetch APIs, apply rolling window, merge with DB cache on 403.
    */
-  async fetchMergedWithFallback(now = new Date()): Promise<ForexFactoryFetchResult> {
+  async fetchMergedWithFallback(
+    now = new Date(),
+  ): Promise<ForexFactoryFetchResult> {
     const range = this.ffClient.getSyncTimeRange(now);
 
-    const [indicatorsApi, newsApi] = await Promise.all([
+    const [mdsApi, calendarApi] = await Promise.all([
       this.ffClient.fetchIndicatorsDataToNewsEvents(
         range.fromDate,
         range.toDate,
@@ -74,8 +76,8 @@ export class NewsService {
     ]);
 
     const apiSlice = this.ffClient.fetchMergedGoldNewsFromApi(
-      indicatorsApi,
-      newsApi,
+      mdsApi,
+      calendarApi,
       range,
     );
 
@@ -84,50 +86,65 @@ export class NewsService {
     let indicatorsFallbackCount = 0;
     let newsFallbackCount = 0;
 
-    if (indicatorsApi.apiStatus === 'forbidden') {
-      const cached = await this.loadCachedIndicatorEventsInWindow(range);
-      indicatorsFallbackCount = cached.length;
+    if (mdsApi.apiStatus === 'forbidden') {
+      const cachedIndicators =
+        await this.loadCachedIndicatorEventsInWindow(range);
+      indicatorsFallbackCount = cachedIndicators.length;
       indicatorsInWindow = this.ffClient.dedupeEvents([
         ...indicatorsInWindow,
-        ...cached,
+        ...cachedIndicators,
       ]);
-      this.logger.warn(
-        `Indicators API forbidden — loaded ${indicatorsFallbackCount} cached indicator events from DB`,
-      );
     }
 
-    if (newsApi.apiStatus === 'forbidden') {
-      const cached = await this.loadCachedNewsEventsInWindow(range);
-      newsFallbackCount = cached.length;
-      newsInWindow = this.ffClient.dedupeEvents([...newsInWindow, ...cached]);
-      this.logger.warn(
-        `News API forbidden — loaded ${newsFallbackCount} cached regular news events from DB`,
-      );
+    if (calendarApi.apiStatus === 'forbidden' && newsInWindow.length === 0) {
+      const cachedNews = await this.loadCachedNewsEventsInWindow(range);
+      newsFallbackCount = cachedNews.length;
+      newsInWindow = this.ffClient.dedupeEvents([
+        ...newsInWindow,
+        ...cachedNews,
+      ]);
+      if (newsFallbackCount > 0) {
+        this.logger.warn(
+          `Calendar API forbidden — loaded ${newsFallbackCount} cached news from DB`,
+        );
+      } else if (mdsApi.apiStatus === 'ok' && apiSlice.newsRaw.length === 0) {
+        this.logger.warn(
+          'Calendar API forbidden and no mds-api news in window — DB cache empty for forexfactory:news',
+        );
+      }
     }
 
     return this.ffClient.buildFetchResult(
       apiSlice.timeWindow,
       {
-        apiStatus: indicatorsApi.apiStatus,
-        apiUrl: indicatorsApi.apiUrl,
-        raw: indicatorsApi.events,
-        inWindow: indicatorsInWindow,
-        fallbackCount: indicatorsFallbackCount,
-      },
-      {
-        apiStatus: newsApi.apiStatus,
-        apiUrl: newsApi.apiUrl,
-        raw: newsApi.events,
+        apiStatus: calendarApi.apiStatus,
+        apiUrl: calendarApi.apiUrl,
+        raw: calendarApi.events,
         inWindow: newsInWindow,
         fallbackCount: newsFallbackCount,
+      },
+      {
+        apiStatus: mdsApi.apiStatus,
+        apiUrl: mdsApi.apiUrl,
+      },
+      {
+        raw: apiSlice.newsRaw,
+        inWindow: newsInWindow,
+        fallbackCount: newsFallbackCount,
+      },
+      {
+        raw: apiSlice.indicatorsRaw,
+        inWindow: indicatorsInWindow,
+        fallbackCount: indicatorsFallbackCount,
       },
     );
   }
 
   /** XauSync `getStoredNewsEventsByRange` — regular news rows only. */
-  async loadCachedNewsEventsInWindow(
-    range: { fromDate: Date; toDate: Date },
-  ): Promise<ForexFactoryNewsEvent[]> {
+  async loadCachedNewsEventsInWindow(range: {
+    fromDate: Date;
+    toDate: Date;
+  }): Promise<ForexFactoryNewsEvent[]> {
     const items = await this.prisma.newsItem.findMany({
       where: {
         source: { in: [...FOREX_FACTORY_NEWS_SOURCE_FILTER.in] },
@@ -140,9 +157,10 @@ export class NewsService {
       .filter((e): e is ForexFactoryNewsEvent => e != null);
   }
 
-  async loadCachedIndicatorEventsInWindow(
-    range: { fromDate: Date; toDate: Date },
-  ): Promise<ForexFactoryNewsEvent[]> {
+  async loadCachedIndicatorEventsInWindow(range: {
+    fromDate: Date;
+    toDate: Date;
+  }): Promise<ForexFactoryNewsEvent[]> {
     const items = await this.prisma.newsItem.findMany({
       where: {
         source: { in: [...FOREX_FACTORY_INDICATOR_SOURCE_FILTER.in] },
@@ -220,8 +238,7 @@ export class NewsService {
     news.fallbackCount = fetch.news.fallbackCount;
 
     for (const event of fetch.events) {
-      const stats =
-        event.forexFactoryType === 'INDICATOR' ? indicators : news;
+      const stats = event.forexFactoryType === 'INDICATOR' ? indicators : news;
       const outcome = await this.upsertForexFactoryEvent(event);
       if (outcome === 'created') stats.created++;
       else if (outcome === 'updated') stats.updated++;
@@ -325,6 +342,8 @@ export class NewsService {
       syncFutureHours: getNewsSyncFutureHours(),
       newsApiStatus: fetch.newsApiStatus,
       newsApiUrl: fetch.newsUrl,
+      mdsApiUrl: fetch.mdsApiUrl,
+      mdsApiStatus: fetch.indicatorsApiStatus,
       indicatorsApiUrl: fetch.indicatorsUrl,
       newsRawCount: fetch.news.raw,
       newsFallbackCount: fetch.news.fallbackCount,
