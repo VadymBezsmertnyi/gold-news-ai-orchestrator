@@ -10,6 +10,9 @@ import { LearningService } from '../learning/learning.service';
 import { NewsService } from '../news/news.service';
 import { PredictionsService } from '../predictions/predictions.service';
 
+// agents
+import { NewsClassifierAgent } from '../ai/agents/news-classifier.agent';
+
 export interface DashboardPredictionRow {
   id: string;
   newsTitle: string;
@@ -71,6 +74,7 @@ export class OrchestratorService {
     private readonly predictionsService: PredictionsService,
     private readonly learningService: LearningService,
     private readonly agentsService: AgentsService,
+    private readonly newsClassifierAgent: NewsClassifierAgent,
   ) {}
 
   async getDashboard(): Promise<DashboardResponse> {
@@ -120,13 +124,9 @@ export class OrchestratorService {
         status: p.status,
         priceBefore: p.result?.priceBefore ?? p.priceAtPrediction,
         priceAfter: p.result?.priceAfter ?? null,
-        result: p.result
-          ? p.result.isSuccess
-            ? 'SUCCESS'
-            : 'FAILED'
-          : null,
+        result: p.result ? (p.result.isSuccess ? 'SUCCESS' : 'FAILED') : null,
       })),
-      recentNews: recentNews as DashboardNewsRow[],
+      recentNews,
       globalContext,
       learningRules,
       orchestratorNote:
@@ -134,26 +134,72 @@ export class OrchestratorService {
     };
   }
 
-  /**
-   * Placeholder for future Claude single-news analysis.
-   * Does not mark news as analyzed and does not call AI.
-   */
-  async analyzePendingNewsPlaceholder(
-    limit = 5,
-  ): Promise<PendingAnalysisPlaceholderResult> {
-    const pending = await this.newsService.findPendingAnalysis(limit);
-    const ids = pending.map((item) => item.id);
+  async analyzePendingNewsPlaceholder(limit = 5) {
+    const newsItems = await this.prisma.newsItem.findMany({
+      where: {
+        analysisStatus: 'PENDING',
+      },
+      orderBy: {
+        publishedAt: 'desc',
+      },
+      take: limit,
+    });
+    const results = [];
 
-    if (ids.length > 0)
-      this.logger.log(
-        `analyzePendingNewsPlaceholder: ${ids.length} item(s) ready for future agents — ${ids.join(', ')}`,
-      );
+    for (const newsItem of newsItems) {
+      try {
+        const output = await this.newsClassifierAgent.run({
+          title: newsItem.title,
+          summary: newsItem.summary,
+          source: newsItem.source,
+          publishedAt: newsItem.publishedAt,
+        });
+
+        const updatedNewsItem = await this.prisma.newsItem.update({
+          where: {
+            id: newsItem.id,
+          },
+          data: {
+            category: output.category,
+            impactLevel: output.impactLevel,
+            analysisSummary: output.summary,
+            analysisStatus: 'ANALYZED',
+            analyzedAt: new Date(),
+            analysisError: null,
+          },
+        });
+
+        results.push({
+          id: updatedNewsItem.id,
+          title: updatedNewsItem.title,
+          category: updatedNewsItem.category,
+          impactLevel: updatedNewsItem.impactLevel,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Unknown classifier error';
+
+        await this.prisma.newsItem.update({
+          where: {
+            id: newsItem.id,
+          },
+          data: {
+            analysisStatus: 'FAILED',
+            analysisError: message,
+          },
+        });
+
+        results.push({
+          id: newsItem.id,
+          title: newsItem.title,
+          error: message,
+        });
+      }
+    }
 
     return {
-      count: ids.length,
-      ids,
-      message:
-        'Placeholder only. Wire Claude agents later to populate analysis fields and create predictions.',
+      count: results.length,
+      results,
     };
   }
 
