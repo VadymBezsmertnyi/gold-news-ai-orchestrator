@@ -124,7 +124,10 @@ export class PredictionEvaluationHooksService implements PredictionEvaluationHan
       });
 
       if (output.confidence < this.learningMinConfidence) {
-        await this.logLearningSkipped('confidence_below_threshold', prediction.id);
+        await this.logLearningSkipped(
+          'confidence_below_threshold',
+          prediction.id,
+        );
         return;
       }
 
@@ -135,7 +138,7 @@ export class PredictionEvaluationHooksService implements PredictionEvaluationHan
 
       if (!upsert) {
         await this.logLearningSkipped(
-          output.rootCause || 'improvement_rejected',
+          output.declineReason || output.rootCause || 'improvement_rejected',
           prediction.id,
         );
         return;
@@ -144,14 +147,19 @@ export class PredictionEvaluationHooksService implements PredictionEvaluationHan
       await this.serverLogsService.info(
         SERVER_LOG_TYPES.LEARNING_RULE_CREATED,
         upsert.mergedDuplicate
-          ? 'Prompt improvement merged (duplicate)'
-          : 'Prompt improvement created',
+          ? upsert.promoted
+            ? 'Prompt improvement promoted to ACTIVE'
+            : 'Prompt improvement candidate merged'
+          : 'Prompt improvement candidate created',
         {
           predictionId: prediction.id,
           improvementId: upsert.record.id,
           problemType: upsert.record.problemType,
+          status: upsert.record.status,
+          occurrences: upsert.record.occurrences,
           confidence: upsert.record.confidence,
           mergedDuplicate: upsert.mergedDuplicate,
+          promoted: upsert.promoted,
         },
       );
     } catch (error) {

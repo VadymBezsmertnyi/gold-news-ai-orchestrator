@@ -130,7 +130,7 @@ export interface DashboardResponse {
   recentServerLogs: DashboardServerLogRow[];
   lastNewsSyncAt: Date | null;
   globalContext: DashboardGlobalContext | null;
-  promptImprovements: DashboardPromptImprovement[];
+  promptImprovements: DashboardPromptImprovementSection;
   deprecatedLearningRules: DashboardDeprecatedLearningRule[];
   orchestratorNote: string;
 }
@@ -138,11 +138,26 @@ export interface DashboardResponse {
 export interface DashboardPromptImprovement {
   id: string;
   problemType: string;
+  status: string;
+  occurrences: number;
+  confidence: number | null;
+  successRate: number | null;
+  promptImprovementPreview: string;
   rootCause: string;
   promptImprovement: string;
-  confidence: number | null;
   sourcePredictionId: string | null;
   createdAt: Date;
+  lastSeenAt: Date | null;
+}
+
+export interface DashboardPromptImprovementSection {
+  counts: {
+    active: number;
+    candidate: number;
+    deprecated: number;
+    rejected: number;
+  };
+  items: DashboardPromptImprovement[];
 }
 
 export interface DashboardDeprecatedLearningRule {
@@ -213,8 +228,7 @@ export class OrchestratorService {
       failedAnalysisNewsCount,
       recentPredictions,
       recentNews,
-      promptImprovementRows,
-      deprecatedLearningRules,
+      promptImprovementSection,
       globalContext,
       recentServerLogs,
       lastNewsSyncAt,
@@ -229,8 +243,7 @@ export class OrchestratorService {
       this.newsService.countByAnalysisStatus(NewsAnalysisStatus.FAILED),
       this.predictionsService.findRecentForDashboard(15),
       this.newsService.findRecentForDashboard(100),
-      this.learningService.findActivePromptImprovements(),
-      this.learningService.findDeprecated(),
+      this.learningService.findForDashboard(),
       this.getLatestGlobalContext(),
       this.serverLogsService.findLatest(80),
       this.serverLogsService.getLastCompletedAt('news_sync'),
@@ -316,21 +329,24 @@ export class OrchestratorService {
       })),
       lastNewsSyncAt,
       globalContext,
-      promptImprovements: promptImprovementRows.map((r) => ({
-        id: r.id,
-        problemType: r.problemType ?? '',
-        rootCause: r.rootCause ?? '',
-        promptImprovement: r.promptImprovement ?? '',
-        confidence: r.confidence,
-        sourcePredictionId: r.sourcePredictionId,
-        createdAt: r.createdAt,
-      })),
-      deprecatedLearningRules: deprecatedLearningRules.map((r) => ({
-        id: r.id,
-        title: r.title,
-        description: r.description,
-        createdAt: r.createdAt,
-      })),
+      promptImprovements: {
+        counts: promptImprovementSection.counts,
+        items: promptImprovementSection.items.map((r) => ({
+          id: r.id,
+          problemType: r.problemType,
+          status: r.status,
+          occurrences: r.occurrences,
+          confidence: r.confidence,
+          successRate: r.successRate,
+          promptImprovementPreview: r.promptImprovementPreview,
+          rootCause: r.rootCause,
+          promptImprovement: r.promptImprovement,
+          sourcePredictionId: r.sourcePredictionId,
+          createdAt: r.createdAt,
+          lastSeenAt: r.lastSeenAt,
+        })),
+      },
+      deprecatedLearningRules: [],
       orchestratorNote:
         'Live MetaAPI + news/analysis/evaluation + global context (30m) + prompt improvements on failures.',
     };

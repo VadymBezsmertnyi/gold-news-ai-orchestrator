@@ -15,27 +15,9 @@ export class LearningAgent {
   async run(input: LearningAgentInput): Promise<LearningAgentOutput> {
     const payload = JSON.stringify(
       {
-        news: {
-          id: input.news.id,
-          title: input.news.title,
-          category: input.news.category,
-          impactLevel: input.news.impactLevel,
-          goldImpact: input.news.goldImpact,
-          analysisSummary: input.news.analysisSummary,
-        },
-        prediction: {
-          id: input.prediction.id,
-          direction: input.prediction.direction,
-          confidence: input.prediction.confidence,
-          reason: input.prediction.reason,
-          sourceType: input.prediction.sourceType,
-        },
-        result: {
-          isSuccess: input.result.isSuccess,
-          actualMovePercent: input.result.actualMovePercent,
-          priceBefore: input.result.priceBefore,
-          priceAfter: input.result.priceAfter,
-        },
+        news: input.news,
+        prediction: input.prediction,
+        result: input.result,
         currentPrice: input.currentPrice,
         recentNews: input.recentNews,
         activePromptImprovements: input.activePromptImprovements,
@@ -50,52 +32,45 @@ export class LearningAgent {
       provider: LlmProviderType.CLAUDE,
       model: process.env.CLAUDE_MODEL_SMART || 'claude-sonnet-4-6',
       temperature: 0.15,
-      maxTokens: 900,
-      system: `You are a Prompt Improvement Engine for educational XAUUSD analytics agents.
-You analyze reasoning failures and produce reusable prompt-design fixes.
-You NEVER store market conclusions, geopolitical takes, or event-specific opinions.`,
+      maxTokens: 700,
+      system: `You are a Prompt Improvement Quality Engine for educational XAUUSD analytics.
+Output reusable prompt-design fixes only. Never store market conclusions or event-specific rules.
+Keep rootCause under 220 chars and promptImprovement under 280 chars.`,
       prompt: `
-A SINGLE_NEWS prediction FAILED. Diagnose the reasoning/process failure and propose ONE reusable prompt improvement.
-
-Check especially for:
-- impact misclassification (treated LOW as HIGH or vice versa)
-- over-weighting LOW impact news
-- ignoring HIGH/MEDIUM news in the same session
-- confidence too high for LOW-only or weak signals
-- conflicting HIGH/MEDIUM signals ignored (use CONFLICTING_SIGNAL_GAP or SIGNAL_WEIGHTING_GAP)
+A SINGLE_NEWS prediction FAILED. Propose ONE reusable prompt improvement OR decline.
 
 Data:
 ${payload}
 
-ALLOWED problemType (use exactly one):
-${allowedTypes}
+ALLOWED problemType: ${allowedTypes}
 
-OUTPUT MEANING:
-- problemType: category of reasoning failure (from allowed list only)
-- rootCause: why the agent's reasoning process failed (not a market recap)
-- promptImprovement: instruction to add to future agent prompts (how to think, not what the market is)
-- shouldCreateImprovement: false if not generalizable or duplicates activePromptImprovements
-- confidence: 1-100 strength of this improvement proposal
+LENGTH LIMITS (hard):
+- rootCause max 220 chars
+- promptImprovement max 280 chars
+- no paragraphs, no headline names, no countries/events as rules
 
-GOOD example (SIGNAL_WEIGHTING_GAP):
-rootCause: "Agent counted signals equally instead of weighting by impact."
-promptImprovement: "Rank all available signals by expected market importance before determining directional bias."
+Set shouldCreateImprovement=false with declineReason when:
+- MARKET_NOISE — random move, not fixable by prompt
+- INSUFFICIENT_EVIDENCE — not enough to generalize
+- DATA_GAP — missing input data caused failure
+- PRICE_HISTORY_GAP — price/history issue, not reasoning
+- DUPLICATE_EXISTING — same as activePromptImprovements
+- TOO_MARKET_SPECIFIC — cannot generalize without event names
 
-GOOD example (CONFIDENCE_GAP):
-rootCause: "Confidence was too high despite conflicting signals."
-promptImprovement: "Reduce confidence when opposing signals are present and cannot be clearly ranked."
+FORBIDDEN in promptImprovement (use TOO_MARKET_SPECIFIC):
+- Lebanon/Hezbollah/Fed/CPI/EIA/jobless claims specific rules
+- "X news means BUY/SELL"
+- Any one-time market opinion
 
-FORBIDDEN (set shouldCreateImprovement: false):
-- "Lebanon ceasefire usually does not move gold."
-- "UK construction data is bullish."
-- "RBA inflation comments are weak for gold."
-- "Three bullish signals override geopolitical signals."
-- "SELL should not be used for ceasefire news."
-- Any headline-specific or country-specific market rule
+GOOD promptImprovement examples:
+- "Rank simultaneous signals by impact before direction."
+- "Reduce confidence when same-session signals conflict."
+- "Do not use signals absent from input data."
 
 Return JSON:
 {
   "shouldCreateImprovement": false,
+  "declineReason": "MARKET_NOISE",
   "problemType": "REASONING_GAP",
   "rootCause": "",
   "promptImprovement": "",

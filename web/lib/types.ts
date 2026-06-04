@@ -92,13 +92,29 @@ export interface DashboardGlobalContext {
 export interface DashboardPromptImprovement {
   id: string;
   problemType: string;
+  status: "CANDIDATE" | "ACTIVE" | "REJECTED" | "DEPRECATED";
+  occurrences: number;
+  confidence: number | null;
+  successRate: number | null;
+  promptImprovementPreview: string;
   rootCause: string;
   promptImprovement: string;
-  confidence: number | null;
   sourcePredictionId: string | null;
   createdAt: string;
+  lastSeenAt: string | null;
 }
 
+export interface DashboardPromptImprovementSection {
+  counts: {
+    active: number;
+    candidate: number;
+    deprecated: number;
+    rejected: number;
+  };
+  items: DashboardPromptImprovement[];
+}
+
+/** @deprecated legacy — deprecated rows now use status DEPRECATED in promptImprovements */
 export interface DashboardDeprecatedLearningRule {
   id: string;
   title: string | null;
@@ -115,7 +131,7 @@ export interface DashboardResponse {
   recentServerLogs: DashboardServerLogRow[];
   lastNewsSyncAt: string | null;
   globalContext: DashboardGlobalContext | null;
-  promptImprovements: DashboardPromptImprovement[];
+  promptImprovements: DashboardPromptImprovementSection;
   deprecatedLearningRules: DashboardDeprecatedLearningRule[];
   orchestratorNote: string;
 }

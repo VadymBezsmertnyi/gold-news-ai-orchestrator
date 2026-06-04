@@ -1,13 +1,7 @@
 "use client";
 
 // react
-import {
-  Fragment,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 
 // lib
 import { fetchDashboard } from "@/lib/api";
@@ -255,9 +249,7 @@ function PredictionStatusIndicator({
   >;
 }) {
   const display = translatePredictionDisplayStatus(row);
-  return (
-    <CompactStatusIndicator label={display.label} tone={display.tone} />
-  );
+  return <CompactStatusIndicator label={display.label} tone={display.tone} />;
 }
 
 const GOAL_COMPLETION_STYLES: Record<GoalCompletionTone, string> = {
@@ -308,7 +300,7 @@ function EventStateCell({
   const state = formatEventState(
     row.eventStartAt,
     row.eventEndAt,
-    row.checkAfter,
+    row.checkAfter
   );
   const emoji = EVENT_STATE_EMOJI[state.tone];
   const primary = state.title ?? state.line2;
@@ -334,7 +326,7 @@ function PredictionMetricsCells({ row }: { row: DashboardPredictionRow }) {
   const expectedPrice = computeExpectedPrice(
     startForTarget,
     row.expectedMovePercent,
-    row.direction,
+    row.direction
   );
   const currentOrFinalPrice = resolveCurrentOrFinalPriceForRow(row);
   const signedActual = displaySignedActualMovePercent(row);
@@ -343,14 +335,18 @@ function PredictionMetricsCells({ row }: { row: DashboardPredictionRow }) {
     <>
       <td className={TD_NUM}>
         {startDisplay != null ? (
-          <span className={PRICE_TARGET_CLASS}>{formatPrice(startDisplay)}</span>
+          <span className={PRICE_TARGET_CLASS}>
+            {formatPrice(startDisplay)}
+          </span>
         ) : (
           <span className="text-zinc-400">—</span>
         )}
       </td>
       <td className={TD_NUM}>
         {expectedPrice != null ? (
-          <span className={PRICE_TARGET_CLASS}>{formatPrice(expectedPrice)}</span>
+          <span className={PRICE_TARGET_CLASS}>
+            {formatPrice(expectedPrice)}
+          </span>
         ) : (
           <span className="text-zinc-400">—</span>
         )}
@@ -367,9 +363,7 @@ function PredictionMetricsCells({ row }: { row: DashboardPredictionRow }) {
       <td className={TD_NUM}>
         {formatExpectedMoveDisplay(row.direction, row.expectedMovePercent)}
       </td>
-      <td className={TD_NUM}>
-        {formatSignedMovePercent(signedActual)}
-      </td>
+      <td className={TD_NUM}>{formatSignedMovePercent(signedActual)}</td>
       <td className={TD_NUM}>
         {goalCompletion != null ? (
           <GoalCompletionBadge value={goalCompletion} />
@@ -401,7 +395,13 @@ function RowExpandButton({
   );
 }
 
-function DetailItem({ label, children }: { label: string; children: ReactNode }) {
+function DetailItem({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
   return (
     <div>
       <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
@@ -418,7 +418,7 @@ function PredictionRowDetails({ row }: { row: DashboardPredictionRow }) {
   const duration = formatEventWindowDuration(
     row.eventStartAt,
     row.eventEndAt,
-    row.checkAfter,
+    row.checkAfter
   );
 
   return (
@@ -586,11 +586,7 @@ function HeaderLivePrice({ dashboard }: { dashboard: DashboardResponse }) {
         </span>
         <span className="text-[9px] text-zinc-400">
           {sourceBadgeLabel(marketPrice.source)}
-          <span
-            className={
-              online ? " text-emerald-400" : " text-amber-400"
-            }
-          >
+          <span className={online ? " text-emerald-400" : " text-amber-400"}>
             {" "}
             ● {online ? "Online" : "Offline"}
           </span>
@@ -825,9 +821,7 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                     <div className="flex items-start">
                       <RowExpandButton
                         expanded={expanded}
-                        onToggle={() =>
-                          setExpandedId(expanded ? null : row.id)
-                        }
+                        onToggle={() => setExpandedId(expanded ? null : row.id)}
                       />
                       <NewsTitleCell title={row.newsTitle} />
                     </div>
@@ -906,9 +900,7 @@ function RecentNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
                     <div className="flex items-start">
                       <RowExpandButton
                         expanded={expanded}
-                        onToggle={() =>
-                          setExpandedId(expanded ? null : row.id)
-                        }
+                        onToggle={() => setExpandedId(expanded ? null : row.id)}
                       />
                       <NewsTitleCell title={row.title} />
                     </div>
@@ -1014,53 +1006,125 @@ function GlobalContextCard({ ctx }: { ctx: DashboardGlobalContext }) {
   );
 }
 
-function PromptImprovementsList({
-  items,
+function PromptImprovementStatusBadge({
+  status,
 }: {
-  items: DashboardResponse["promptImprovements"];
+  status: DashboardResponse["promptImprovements"]["items"][number]["status"];
 }) {
+  const tones: Record<string, string> = {
+    CANDIDATE: "bg-amber-100 text-amber-900 border-amber-300",
+    ACTIVE: "bg-emerald-100 text-emerald-900 border-emerald-300",
+    DEPRECATED: "bg-zinc-200 text-zinc-600 border-zinc-300",
+    REJECTED: "bg-red-100 text-red-900 border-red-300",
+  };
+  const labels: Record<string, string> = {
+    CANDIDATE: "Кандидат",
+    ACTIVE: "Активне",
+    DEPRECATED: "Застаріле",
+    REJECTED: "Відхилено",
+  };
+  return (
+    <span
+      className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase ${tones[status] ?? "bg-zinc-100"}`}
+    >
+      {labels[status] ?? status}
+    </span>
+  );
+}
+
+function PromptImprovementsList({
+  section,
+}: {
+  section: DashboardResponse["promptImprovements"];
+}) {
+  const { counts, items } = section;
+
   if (items.length === 0)
     return (
       <p className="text-xs text-zinc-500">
-        Покращення зʼявляться після невдалих прогнозів, якщо агент навчання
-        знайде узагальнену помилку міркування (не висновок про ринок).
+        Покращення зʼявляться після невдалих прогнозів як кандидати; активними
+        стають після повторення (≥2) або вручну.
       </p>
     );
 
   return (
-    <ul className="space-y-2">
-      {items.map((item) => (
-        <li
-          key={item.id}
-          className="rounded-lg border border-violet-200/80 bg-violet-50/40 px-3 py-2 text-xs"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-violet-900">
-              {item.problemType}
-            </span>
-            {item.confidence != null ? (
-              <span className="text-[10px] text-violet-700">
-                впевненість {item.confidence}%
-              </span>
-            ) : null}
-          </div>
-          <p className="mt-1 text-zinc-600">
-            <span className="font-medium text-zinc-700">Причина: </span>
+    <div className="space-y-3">
+      <p className="text-xs text-zinc-600">
+        Активні: <strong>{counts.active}</strong> · Кандидати:{" "}
+        <strong>{counts.candidate}</strong> · Застарілі:{" "}
+        <strong>{counts.deprecated}</strong>
+        {counts.rejected > 0 ? (
+          <>
+            {" "}
+            · Відхилені: <strong>{counts.rejected}</strong>
+          </>
+        ) : null}
+      </p>
+      <ul className="space-y-2">
+        {items.map((item) => (
+          <PromptImprovementRow key={item.id} item={item} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PromptImprovementRow({
+  item,
+}: {
+  item: DashboardResponse["promptImprovements"]["items"][number];
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <li className="rounded-lg border border-violet-200/80 bg-violet-50/40 px-3 py-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold text-violet-900">
+          {item.problemType}
+        </span>
+        <PromptImprovementStatusBadge status={item.status} />
+        <span className="text-[10px] text-zinc-500">×{item.occurrences}</span>
+        {item.confidence != null ? (
+          <span className="text-[10px] text-violet-700">
+            conf {item.confidence}%
+          </span>
+        ) : null}
+        {item.successRate != null ? (
+          <span className="text-[10px] text-zinc-600">
+            SR {(item.successRate * 100).toFixed(0)}%
+          </span>
+        ) : null}
+      </div>
+      <p className="mt-1 text-zinc-800">{item.promptImprovementPreview}</p>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="mt-1 text-[10px] font-medium text-violet-800 underline-offset-2 hover:underline"
+      >
+        {expanded ? "Згорнути" : "Деталі"}
+      </button>
+      {expanded ? (
+        <div className="mt-2 space-y-1 border-t border-violet-200/60 pt-2 text-zinc-700">
+          <p>
+            <span className="font-medium">Причина: </span>
             {item.rootCause}
           </p>
-          <p className="mt-1 text-zinc-800">
-            <span className="font-medium text-zinc-700">Покращення: </span>
+          <p>
+            <span className="font-medium">Покращення: </span>
             {item.promptImprovement}
           </p>
-          <p className="mt-1 text-[10px] text-zinc-500">
+          <p className="text-[10px] text-zinc-500">
             {formatDateTimeUk(item.createdAt)}
+            {item.lastSeenAt
+              ? ` · бачили ${formatDateTimeUk(item.lastSeenAt)}`
+              : ""}
             {item.sourcePredictionId
               ? ` · прогноз ${item.sourcePredictionId.slice(0, 8)}…`
               : ""}
           </p>
-        </li>
-      ))}
-    </ul>
+        </div>
+      ) : null}
+    </li>
   );
 }
 
@@ -1252,17 +1316,7 @@ export default function DashboardClient() {
 
             <section>
               <SectionTitle>{SECTION_TITLES.promptImprovements}</SectionTitle>
-              <PromptImprovementsList items={dashboard.promptImprovements} />
-              {dashboard.deprecatedLearningRules.length > 0 ? (
-                <>
-                  <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-                    {SECTION_TITLES.deprecatedRules}
-                  </p>
-                  <DeprecatedLearningRulesList
-                    rules={dashboard.deprecatedLearningRules}
-                  />
-                </>
-              ) : null}
+              <PromptImprovementsList section={dashboard.promptImprovements} />
             </section>
 
             <section>

@@ -163,29 +163,42 @@ model PredictionResult {
   prediction Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade)
 }
 
+enum PromptImprovementStatus {
+  CANDIDATE
+  ACTIVE
+  REJECTED
+  DEPRECATED
+}
+
 /// Reusable prompt/reasoning improvements — never market conclusions.
 model PromptImprovement {
-  id                 String    @id @default(cuid())
-  problemType        String
-  rootCause          String
-  promptImprovement  String
-  confidence         Int?
-  sourcePredictionId String?
-  isDeprecated       Boolean   @default(false)
-  occurrences        Int       @default(1)
-  usageCount         Int       @default(0)
-  timesApplied       Int       @default(0)
-  successCount       Int       @default(0)
-  failureCount       Int       @default(0)
-  successRate        Float?
-  lastAppliedAt      DateTime?
+  id                  String                  @id @default(cuid())
+  problemType         String
+  rootCause           String
+  promptImprovement   String
+  confidence          Int?
+  status              PromptImprovementStatus @default(CANDIDATE)
+  sourcePredictionId  String?
+  sourcePredictionIds Json?
+  rejectionReason     String?
+  manualPromote       Boolean                 @default(false)
+  isDeprecated        Boolean                 @default(false)
+  occurrences         Int                     @default(1)
+  usageCount          Int                     @default(0)
+  timesApplied        Int                     @default(0)
+  successCount        Int                     @default(0)
+  failureCount        Int                     @default(0)
+  successRate         Float?
+  lastAppliedAt       DateTime?
+  lastSeenAt          DateTime?
   /// Legacy market-rule fields — do not use in prompts
-  title              String?
-  description        String?
-  isActive           Boolean   @default(true)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  title               String?
+  description         String?
+  isActive            Boolean                 @default(true)
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
 
+  @@index([status, lastSeenAt])
   @@index([isDeprecated, createdAt])
   @@map("LearningRule")
 }

@@ -5,4 +5,5 @@ export class CreateLearningRuleDto {
   confidence?: number;
   sourcePredictionId?: string;
   isActive?: boolean;
+  manualPromote?: boolean;
 }
