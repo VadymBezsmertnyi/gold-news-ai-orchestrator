@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum PredictionDirection {
+  BUY
+  SELL
+  NEUTRAL
+}
+
+enum PredictionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  EXPIRED
+}
+
+enum AgentRunStatus {
+  SUCCESS
+  FAILED
+}
+
+model NewsItem {
+  id          String   @id @default(cuid())
+  externalId  String?  @unique
+  source      String
+  title       String
+  url         String?
+  summary     String?
+  rawPayload  Json?
+  publishedAt DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  predictions Prediction[]
+}
+
+model Prediction {
+  id                  String              @id @default(cuid())
+  newsItemId          String
+  direction           PredictionDirection
+  confidence          Int
+  expectedMovePercent Float?
+  timeframeMinutes    Int
+  reason              String
+  status              PredictionStatus    @default(PENDING)
+  priceAtPrediction   Float?
+  checkAfter          DateTime
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  newsItem NewsItem          @relation(fields: [newsItemId], references: [id], onDelete: Cascade)
+  result   PredictionResult?
+
+  @@index([status])
+  @@index([newsItemId])
+}
+
+model AgentRun {
+  id        String         @id @default(cuid())
+  agentName String
+  input     Json?
+  output    Json?
+  status    AgentRunStatus
+  error     String?
+  createdAt DateTime       @default(now())
+
+  @@index([agentName])
+}
+
+model MarketPriceSnapshot {
+  id         String   @id @default(cuid())
+  symbol     String   @default("XAUUSD")
+  price      Float
+  source     String
+  capturedAt DateTime
+  rawPayload Json?
+  createdAt  DateTime @default(now())
+
+  @@index([symbol, capturedAt])
+}
+
+model PredictionResult {
+  id                String   @id @default(cuid())
+  predictionId      String   @unique
+  priceBefore       Float
+  priceAfter        Float
+  actualMovePercent Float
+  isSuccess         Boolean
+  explanation       String?
+  evaluatedAt       DateTime
+  createdAt         DateTime @default(now())
+
+  prediction Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade)
+}
+
+model LearningRule {
+  id                 String   @id @default(cuid())
+  title              String
+  description        String
+  sourcePredictionId String?
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}

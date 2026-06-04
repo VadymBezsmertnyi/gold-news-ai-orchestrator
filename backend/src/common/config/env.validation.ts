@@ -1,0 +1,19 @@
+export interface AppEnv {
+  DATABASE_URL: string;
+  DIRECT_URL?: string;
+  REDIS_URL?: string;
+  METAAPI_TOKEN?: string;
+  METAAPI_ACCOUNT_ID?: string;
+  NODE_ENV: string;
+  PORT: number;
+}
+
+export const validateEnv = (): AppEnv => ({
+  DATABASE_URL: process.env.DATABASE_URL ?? '',
+  DIRECT_URL: process.env.DIRECT_URL,
+  REDIS_URL: process.env.REDIS_URL,
+  METAAPI_TOKEN: process.env.METAAPI_TOKEN,
+  METAAPI_ACCOUNT_ID: process.env.METAAPI_ACCOUNT_ID,
+  NODE_ENV: process.env.NODE_ENV ?? 'development',
+  PORT: Number(process.env.PORT ?? 3001),
+});
