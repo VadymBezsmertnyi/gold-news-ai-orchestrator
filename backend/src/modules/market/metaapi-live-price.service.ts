@@ -61,6 +61,7 @@ export class MetaApiLivePriceService implements OnModuleInit, OnModuleDestroy {
   private disconnectPromise: Promise<void> | null = null;
   private connectPromise: Promise<void> | null = null;
   private disconnectLogged = false;
+  private streamReadyLogged = false;
 
   private lastSnapshotAt = 0;
   private lastLogAt = 0;
@@ -93,6 +94,10 @@ export class MetaApiLivePriceService implements OnModuleInit, OnModuleDestroy {
 
   getLatestPrice(): LiveGoldPrice | null {
     return this.stateStore.getState().latestPrice;
+  }
+
+  getStreamSymbol(): string {
+    return this.symbol;
   }
 
   /** Account handle for historical candles (RPC, not streaming). */
@@ -258,6 +263,7 @@ export class MetaApiLivePriceService implements OnModuleInit, OnModuleDestroy {
     this.stateStore.reset();
     this.isDisconnected = true;
     this.isStopping = true;
+    this.streamReadyLogged = false;
 
     if (!this.disconnectLogged) {
       this.disconnectLogged = true;
@@ -318,10 +324,7 @@ export class MetaApiLivePriceService implements OnModuleInit, OnModuleDestroy {
       const listener = createMetaApiPriceListener(this.stateStore, {
         symbol: this.symbol,
         onConnected: () => {
-          void this.serverLogs.info(
-            METAAPI_LOG_TYPES.CONNECTED,
-            'MetaAPI websocket connected',
-          );
+          this.logger.debug('MetaAPI websocket connected');
         },
         onDisconnected: () => {
           if (this.isStopping) return;
@@ -359,10 +362,13 @@ export class MetaApiLivePriceService implements OnModuleInit, OnModuleDestroy {
       this.isDisconnected = false;
       this.isStopping = false;
 
-      await this.serverLogs.info(
-        METAAPI_LOG_TYPES.CONNECTED,
-        `MetaAPI live price stream ready for ${this.symbol}`,
-      );
+      if (!this.streamReadyLogged) {
+        this.streamReadyLogged = true;
+        await this.serverLogs.info(
+          METAAPI_LOG_TYPES.CONNECTED,
+          `MetaAPI live price stream ready for ${this.symbol}`,
+        );
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unknown MetaAPI error';

@@ -94,8 +94,9 @@ export class EventStartPriceService {
     }
 
     if (eventMs < nowMs - EVENT_START_CAPTURE_WINDOW_SECONDS * 1000) {
+      const symbol = this.metaApiHistorical.resolveHistorySymbol(XAUUSD_SYMBOL);
       const historical = await this.metaApiHistorical.getHistoricalPriceAt(
-        XAUUSD_SYMBOL,
+        symbol,
         eventStartAt,
         prediction.id,
       );
@@ -154,10 +155,6 @@ export class EventStartPriceService {
         sourceType: PredictionSourceType.SINGLE_NEWS,
         eventStartAt: { not: null },
         priceAtEventStart: null,
-        OR: [
-          { invalidationReason: null },
-          { invalidationReason: { not: MISSING_EVENT_START_PRICE } },
-        ],
         AND: [
           {
             OR: [
@@ -179,19 +176,24 @@ export class EventStartPriceService {
 
       if (resolution.price == null) {
         summary.missing++;
-        await this.prisma.prediction.update({
-          where: { id: prediction.id },
-          data: { invalidationReason: MISSING_EVENT_START_PRICE },
-        });
-        await this.serverLogs.warn(
-          EVENT_START_LOG_TYPES.MISSING,
-          'Event start price missing',
-          {
-            predictionId: prediction.id,
-            eventStartAt: resolveEventStartAt(prediction).toISOString(),
-            reason: resolution.reason,
-          },
+        const historyThrottled = !this.metaApiHistorical.canAttemptHistory(
+          prediction.id,
         );
+        if (!historyThrottled) {
+          await this.prisma.prediction.update({
+            where: { id: prediction.id },
+            data: { invalidationReason: MISSING_EVENT_START_PRICE },
+          });
+          await this.serverLogs.warn(
+            EVENT_START_LOG_TYPES.MISSING,
+            'Event start price missing',
+            {
+              predictionId: prediction.id,
+              eventStartAt: resolveEventStartAt(prediction).toISOString(),
+              reason: resolution.reason,
+            },
+          );
+        }
         continue;
       }
 
