@@ -35,23 +35,39 @@ export class PredictionAgent {
       prompt: `
 Create an educational prediction for XAUUSD based on this analyzed news.
 
+IMPORTANCE HIERARCHY (strict):
+- HIGH impact news must be evaluated first.
+- MEDIUM impact news second.
+- LOW impact news must NOT dominate direction unless several aligned LOW signals exist, no HIGH/MEDIUM conflict, and price action would confirm.
+
+Before output, reason through (in order):
+A) Is the TARGET news HIGH, MEDIUM, or LOW impact?
+B) Are there HIGH/MEDIUM events in the same session window?
+C) Are there conflicting signals?
+D) Is this news important enough for a directional prediction (not just noise)?
+E) If not important enough → lower confidence or choose NEUTRAL.
+
 Context:
 {
-  "title": "${input.title}",
-  "summary": "${input.summary || ''}",
-  "category": "${input.category || ''}",
-  "impactLevel": "${input.impactLevel || ''}",
-  "goldImpact": "${input.goldImpact || ''}",
-  "impactReason": "${input.impactReason || ''}",
+  "targetNews": {
+    "title": "${input.title}",
+    "summary": "${input.summary || ''}",
+    "category": "${input.category || ''}",
+    "impactLevel": "${input.impactLevel || ''}",
+    "goldImpact": "${input.goldImpact || ''}",
+    "impactReason": "${input.impactReason || ''}",
+    "publishedAt": "${input.publishedAt.toISOString()}"
+  },
   "currentPrice": ${input.currentPrice},
-  "publishedAt": "${input.publishedAt.toISOString()}"
+  "sessionNewsByImpact": ${JSON.stringify(input.sessionNewsByImpact ?? { highImpactNews: [], mediumImpactNews: [], lowImpactNews: [] })}
 }
 
 Rules:
 - direction must be BUY, SELL, or NEUTRAL.
-- If goldImpact is BULLISH, direction is usually BUY.
-- If goldImpact is BEARISH, direction is usually SELL.
-- If impact is mixed or weak, use NEUTRAL.
+- LOW impact alone should rarely produce high-confidence BUY/SELL.
+- If goldImpact is BULLISH and impact is sufficient, direction is usually BUY.
+- If goldImpact is BEARISH and impact is sufficient, direction is usually SELL.
+- If impact is mixed, weak, or dominated by conflicting HIGH/MEDIUM news → NEUTRAL or low confidence.
 - confidence must be 1-100.
 - expectedMovePercent must be realistic for the timeframe.
 - timeframeMinutes should be 30, 60, 120, 240, or 1440.

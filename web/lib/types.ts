@@ -30,6 +30,7 @@ export interface DashboardPredictionRow {
   id: string;
   newsTitle: string;
   sourceType: "SINGLE_NEWS" | "GLOBAL_CONTEXT" | string;
+  impactLevel: string | null;
   direction: string;
   confidence: number;
   expectedMovePercent: number | null;

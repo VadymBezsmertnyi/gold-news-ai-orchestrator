@@ -16,10 +16,18 @@ import {
   sortPredictionsByCheckAfter,
 } from "@/lib/dashboard-format";
 import {
+  splitNews,
+  splitPredictions,
+  predictionSummaryChips,
+} from "@/lib/dashboard-grouping";
+import {
   BASELINE_START_DELTA_TOOLTIP,
+  CHIP_LABELS,
   connectionBadgeLabel,
+  IMPORTANT_NEWS_EMPTY,
   LOG_HEADERS,
   NEWS_HEADERS,
+  PREDICTION_IMPORTANT_HINT,
   PREDICTION_HEADERS,
   SECTION_TITLES,
   predictionSourceLabel,
@@ -27,11 +35,14 @@ import {
   STATS_LABELS,
   translateAnalysisStatus,
   translateBaselineSource,
+  translateFinalResultBadge,
+  translateImpactLevel,
   translateLogMessage,
   translateDirectionCorrect,
-  translateExpectedResult,
+  translatePreviewResult,
   translatePredictionStatus,
-  translateResult,
+  type PreviewTone,
+  type ResultTone,
 } from "@/lib/dashboard-i18n";
 import type {
   DashboardGlobalContext,
@@ -45,8 +56,10 @@ const REFRESH_MS = 10_000;
 const PAGE_SHELL = "mx-auto w-[calc(100vw-32px)] max-w-[1900px]";
 const TABLE_SCROLL =
   "overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300";
-const PREDICTIONS_TABLE_MIN = "min-w-[1800px] w-full border-collapse text-left text-xs";
-const NEWS_TABLE_MIN = "min-w-[1100px] w-full border-collapse text-left text-xs";
+const PREDICTIONS_TABLE_MIN =
+  "min-w-[1800px] w-full border-collapse text-left text-xs";
+const NEWS_TABLE_MIN =
+  "min-w-[1100px] w-full border-collapse text-left text-xs";
 const TH = "whitespace-nowrap px-2 py-1.5 font-medium";
 const TD = "whitespace-nowrap px-2 py-1.5 align-middle";
 
@@ -98,20 +111,69 @@ function StatusBadge({
   tone,
 }: {
   label: string;
-  tone: "pending" | "ok" | "fail" | "muted";
+  tone: "pending" | "ok" | "fail" | "muted" | ResultTone | PreviewTone;
 }) {
-  const styles = {
-    pending: "bg-amber-100 text-amber-900 border-amber-200",
+  const styles: Record<string, string> = {
+    pending: "bg-amber-100 text-amber-900 border-amber-300 font-semibold",
     ok: "bg-emerald-100 text-emerald-800 border-emerald-200",
     fail: "bg-red-100 text-red-800 border-red-200",
     muted: "bg-zinc-100 text-zinc-600 border-zinc-200",
+    success: "bg-emerald-600 text-white border-emerald-700 font-semibold",
+    failed: "bg-red-600 text-white border-red-700 font-semibold",
+    overdue: "bg-amber-500 text-white border-amber-600 font-semibold",
+    missingBaseline:
+      "bg-amber-100 text-amber-950 border-amber-400 font-semibold",
+    previewOk: "bg-emerald-50 text-emerald-800 border-emerald-200",
+    previewFail: "bg-red-50 text-red-800 border-red-200",
+    insufficient: "bg-zinc-100 text-zinc-600 border-zinc-300",
   };
   return (
     <span
-      className={`inline-block rounded border px-1 py-px text-[10px] font-medium leading-tight ${styles[tone]}`}
+      className={`inline-block rounded border px-1.5 py-0.5 text-[10px] leading-tight ${styles[tone] ?? styles.muted}`}
     >
       {label}
     </span>
+  );
+}
+
+function ImpactLevelBadge({ level }: { level: string | null }) {
+  const key = (level ?? "").toUpperCase();
+  const styles: Record<string, string> = {
+    HIGH: "border-orange-400 bg-orange-100 text-orange-950 font-semibold",
+    MEDIUM: "border-amber-300 bg-amber-50 text-amber-950",
+    LOW: "border-slate-300 bg-slate-100 text-slate-700",
+  };
+  const label = translateImpactLevel(level);
+  if (label === "—") return <span className="text-zinc-400">—</span>;
+  return (
+    <span
+      className={`inline-block rounded border px-1.5 py-0.5 text-[10px] leading-tight ${styles[key] ?? styles.LOW}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function SummaryChips({ rows }: { rows: DashboardPredictionRow[] }) {
+  const chips = predictionSummaryChips(rows);
+  const items = [
+    { label: CHIP_LABELS.important, value: chips.important },
+    { label: CHIP_LABELS.success, value: chips.success },
+    { label: CHIP_LABELS.failed, value: chips.failed },
+    { label: CHIP_LABELS.pending, value: chips.pending },
+    { label: CHIP_LABELS.missingBaseline, value: chips.missingBaseline },
+  ];
+  return (
+    <div className="mb-3 flex flex-wrap gap-1.5">
+      {items.map((item) => (
+        <span
+          key={item.label}
+          className="rounded-full border border-zinc-200 bg-white px-2 py-0.5 text-[10px] text-zinc-700"
+        >
+          {item.label}: <strong className="tabular-nums">{item.value}</strong>
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -256,27 +318,33 @@ function SectionTitle({ children }: { children: ReactNode }) {
 }
 
 function predictionRowBg(row: DashboardPredictionRow): string {
-  if (row.sourceType === "GLOBAL_CONTEXT") return "bg-violet-50/35";
-  if (row.missingEventStartPrice) return "bg-amber-50/55";
   if (row.result === "SUCCESS" || row.status === "SUCCESS")
-    return "bg-emerald-50/45";
-  if (row.result === "FAILED" || row.status === "FAILED")
-    return "bg-red-50/40";
-  if (row.status === "PENDING" && row.isOverdue) return "bg-amber-50/40";
+    return "bg-emerald-50/50";
+  if (row.result === "FAILED" || row.status === "FAILED") return "bg-red-50/45";
+  if (row.missingEventStartPrice) return "bg-amber-50/55";
+  if (row.status === "PENDING" && row.isOverdue) return "bg-amber-50/45";
+  if (row.sourceType === "GLOBAL_CONTEXT") return "bg-violet-50/25";
   return "bg-white";
 }
 
+function predictionRowBorder(row: DashboardPredictionRow): string {
+  if (row.sourceType === "GLOBAL_CONTEXT")
+    return "border-l-4 border-l-violet-500";
+  if (row.result === "SUCCESS" || row.status === "SUCCESS")
+    return "border-l-4 border-l-emerald-500";
+  if (row.result === "FAILED" || row.status === "FAILED")
+    return "border-l-4 border-l-red-500";
+  if (row.missingEventStartPrice || (row.status === "PENDING" && row.isOverdue))
+    return "border-l-4 border-l-amber-500";
+  return "border-l-4 border-l-transparent";
+}
+
 function predictionRowClasses(row: DashboardPredictionRow): string {
-  const bg = predictionRowBg(row);
-  const hover =
-    row.sourceType === "GLOBAL_CONTEXT"
-      ? "hover:bg-violet-50/55"
-      : "hover:bg-zinc-50/80";
-  const border =
-    row.sourceType === "GLOBAL_CONTEXT"
-      ? "border-l-4 border-l-violet-400"
+  const highAccent =
+    (row.impactLevel ?? "").toUpperCase() === "HIGH"
+      ? "ring-1 ring-inset ring-orange-200/60"
       : "";
-  return `group ${bg} ${hover} ${border}`.trim();
+  return `group ${predictionRowBg(row)} ${predictionRowBorder(row)} hover:brightness-[0.99] ${highAccent}`.trim();
 }
 
 function stickyNewsCell(rowBg: string, isHeader = false): string {
@@ -300,21 +368,25 @@ function NewsTitleCell({ title }: { title: string }) {
   );
 }
 
+function PredictionsTableSection({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: DashboardPredictionRow[];
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mb-4">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-600">
+        {title}
+      </h3>
+      <PredictionsTable rows={rows} />
+    </div>
+  );
+}
+
 function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
-  if (rows.length === 0)
-    return (
-      <p className="text-xs text-zinc-500">
-        Прогнози зʼявляться після автоматичного аналізу новин.
-      </p>
-    );
-
-  const showPreview = (row: DashboardPredictionRow) =>
-    row.status === "PENDING" &&
-    !row.result &&
-    !row.missingEventStartPrice &&
-    row.isPreview &&
-    !!row.previewOutcome;
-
   return (
     <div className={TABLE_SCROLL}>
       <table className={PREDICTIONS_TABLE_MIN}>
@@ -324,6 +396,7 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
               {PREDICTION_HEADERS.news}
             </th>
             <th className={TH}>{PREDICTION_HEADERS.source}</th>
+            <th className={TH}>{PREDICTION_HEADERS.impact}</th>
             <th className={`${TH} ${stickyDirectionCell("bg-zinc-50", true)}`}>
               {PREDICTION_HEADERS.direction}
             </th>
@@ -341,10 +414,7 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
             <th className={TH}>{PREDICTION_HEADERS.preview}</th>
             <th className={TH}>{PREDICTION_HEADERS.eventStart}</th>
             <th className={TH}>{PREDICTION_HEADERS.eventEnd}</th>
-            <th
-              className={TH}
-              title={BASELINE_START_DELTA_TOOLTIP}
-            >
+            <th className={TH} title={BASELINE_START_DELTA_TOOLTIP}>
               {PREDICTION_HEADERS.baselineTimeDiff}
             </th>
           </tr>
@@ -360,33 +430,34 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                 <td className={TD}>
                   <SourceTypeBadge sourceType={row.sourceType} />
                 </td>
+                <td className={TD}>
+                  <ImpactLevelBadge
+                    level={
+                      row.sourceType === "GLOBAL_CONTEXT"
+                        ? null
+                        : row.impactLevel
+                    }
+                  />
+                </td>
                 <td className={`${TD} ${stickyDirectionCell(rowBg)}`}>
                   <DirectionBadge direction={row.direction} />
                 </td>
                 <td className={`${TD} tabular-nums`}>{row.confidence}%</td>
                 <td className={TD}>
                   <StatusBadge
-                    label={translatePredictionStatus(
-                      row.status,
-                      row.isOverdue,
-                    )}
+                    label={translatePredictionStatus(row.status, row.isOverdue)}
                     tone={predictionStatusTone(row.status, row.isOverdue)}
                   />
                 </td>
                 <td className={TD}>
-                  {row.result ? (
-                    <StatusBadge
-                      label={translateResult(row.result)}
-                      tone={row.result === "SUCCESS" ? "ok" : "fail"}
-                    />
-                  ) : (
-                    <span className="text-zinc-400">—</span>
-                  )}
+                  <StatusBadge {...translateFinalResultBadge(row)} />
                 </td>
                 <td className={`${TD} tabular-nums text-zinc-700`}>
                   {formatPrice(row.priceAtPrediction)}
                 </td>
-                <td className={`${TD} tabular-nums font-medium text-violet-900`}>
+                <td
+                  className={`${TD} tabular-nums font-medium text-violet-900`}
+                >
                   {row.missingEventStartPrice ? (
                     <StatusBadge label="Немає старту" tone="pending" />
                   ) : (
@@ -398,7 +469,9 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                     ? translateBaselineSource("missing")
                     : translateBaselineSource(row.baselineSource)}
                 </td>
-                <td className={`${TD} tabular-nums font-medium text-emerald-800`}>
+                <td
+                  className={`${TD} tabular-nums font-medium text-emerald-800`}
+                >
                   {formatPrice(row.currentLivePrice)}
                 </td>
                 <td className={`${TD} tabular-nums`}>
@@ -418,19 +491,17 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                   {translateDirectionCorrect(row.directionCorrect)}
                 </td>
                 <td className={TD}>
-                  {showPreview(row) ? (
-                    <StatusBadge
-                      label={translateExpectedResult(row.previewOutcome)}
-                      tone={row.previewOutcome === "SUCCESS" ? "ok" : "fail"}
-                    />
-                  ) : (
-                    <span className="text-zinc-400">—</span>
-                  )}
+                  {(() => {
+                    const preview = translatePreviewResult(row);
+                    if (!preview)
+                      return <span className="text-zinc-400">—</span>;
+                    return (
+                      <StatusBadge label={preview.label} tone={preview.tone} />
+                    );
+                  })()}
                 </td>
                 <td className={`${TD} text-zinc-600`}>
-                  {row.eventStartAt
-                    ? formatDateTimeUk(row.eventStartAt)
-                    : "—"}
+                  {row.eventStartAt ? formatDateTimeUk(row.eventStartAt) : "—"}
                 </td>
                 <td className={`${TD} text-zinc-600`}>
                   {row.eventEndAt
@@ -452,14 +523,37 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
   );
 }
 
-function RecentNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
-  if (rows.length === 0)
+function NewsTableSection({
+  title,
+  rows,
+  emptyText,
+}: {
+  title: string;
+  rows: DashboardNewsRow[];
+  emptyText?: string;
+}) {
+  if (rows.length === 0 && emptyText) {
     return (
-      <p className="text-xs text-zinc-500">
-        Синхронізація новин кожні 10 хвилин.
-      </p>
+      <div className="mb-4">
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-600">
+          {title}
+        </h3>
+        <p className="text-xs text-zinc-500">{emptyText}</p>
+      </div>
     );
+  }
+  if (rows.length === 0) return null;
+  return (
+    <div className="mb-4">
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-600">
+        {title}
+      </h3>
+      <RecentNewsTable rows={rows} />
+    </div>
+  );
+}
 
+function RecentNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
   return (
     <div className={TABLE_SCROLL}>
       <table className={NEWS_TABLE_MIN}>
@@ -495,7 +589,9 @@ function RecentNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
                 />
               </td>
               <td className={TD}>{row.category ?? "—"}</td>
-              <td className={TD}>{row.impactLevel ?? "—"}</td>
+              <td className={TD}>
+                <ImpactLevelBadge level={row.impactLevel} />
+              </td>
               <td className={TD}>{row.goldImpact ?? "—"}</td>
             </tr>
           ))}
@@ -757,6 +853,16 @@ export default function DashboardClient() {
     return sortPredictionsByCheckAfter(dashboard.recentPredictions);
   }, [dashboard, tick]);
 
+  const { important: importantPredictions, other: otherPredictions } = useMemo(
+    () => splitPredictions(sortedPredictions),
+    [sortedPredictions]
+  );
+
+  const { important: importantNews, other: otherNews } = useMemo(() => {
+    if (!dashboard) return { important: [], other: [] };
+    return splitNews(dashboard.recentNews);
+  }, [dashboard]);
+
   const pendingNews = useMemo(() => {
     if (!dashboard) return [];
     return dashboard.recentNews.filter((n) => n.analysisStatus === "PENDING");
@@ -796,12 +902,39 @@ export default function DashboardClient() {
 
             <section>
               <SectionTitle>{SECTION_TITLES.predictions}</SectionTitle>
-              <PredictionsTable rows={sortedPredictions} />
+              <p className="mb-2 text-[11px] leading-snug text-zinc-600">
+                {PREDICTION_IMPORTANT_HINT}
+              </p>
+              <SummaryChips rows={sortedPredictions} />
+              {sortedPredictions.length === 0 ? (
+                <p className="text-xs text-zinc-500">
+                  Прогнози зʼявляться після автоматичного аналізу новин.
+                </p>
+              ) : (
+                <>
+                  <PredictionsTableSection
+                    title={SECTION_TITLES.importantPredictions}
+                    rows={importantPredictions}
+                  />
+                  <PredictionsTableSection
+                    title={SECTION_TITLES.otherPredictions}
+                    rows={otherPredictions}
+                  />
+                </>
+              )}
             </section>
 
             <section>
               <SectionTitle>{SECTION_TITLES.recentNews}</SectionTitle>
-              <RecentNewsTable rows={dashboard.recentNews} />
+              <NewsTableSection
+                title={SECTION_TITLES.importantNews}
+                rows={importantNews}
+                emptyText={IMPORTANT_NEWS_EMPTY}
+              />
+              <NewsTableSection
+                title={SECTION_TITLES.otherNews}
+                rows={otherNews}
+              />
             </section>
 
             {pendingNews.length > 0 ? (

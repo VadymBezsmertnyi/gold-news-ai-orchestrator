@@ -25,6 +25,7 @@ import { NewsClassifierAgent } from '../ai/agents/news-classifier.agent';
 import { SingleNewsImpactAgent } from '../ai/agents/single-news-impact.agent';
 import { PredictionAgent } from '../ai/agents/prediction.agent';
 import { GlobalMarketContextAgent } from '../ai/agents/global-market-context.agent';
+import { groupByImpactLevel } from '../ai/utils/news-impact-grouping';
 export type GlobalContextTrigger =
   | 'HIGH_IMPACT_NEWS'
   | 'IMPORTANT_PREDICTION_RESULT'
@@ -35,6 +36,7 @@ export interface DashboardPredictionRow {
   id: string;
   newsTitle: string;
   sourceType: string;
+  impactLevel: string | null;
   direction: string;
   confidence: number;
   expectedMovePercent: number | null;
@@ -265,6 +267,7 @@ export class OrchestratorService {
               ? 'Глобальний контекст ринку'
               : (p.newsItem?.title ?? '—'),
           sourceType: p.sourceType,
+          impactLevel: p.newsItem?.impactLevel ?? null,
           direction: p.direction,
           confidence: p.confidence,
           expectedMovePercent: p.expectedMovePercent,
@@ -378,9 +381,24 @@ export class OrchestratorService {
 
     const activeImprovementRows =
       await this.learningService.findActivePromptImprovements();
-    const promptImprovements =
-      this.learningService.toPromptImprovementSlices(activeImprovementRows);
+    const promptImprovements = this.learningService.toPromptImprovementSlices(
+      activeImprovementRows,
+    );
     const appliedImprovementIds = promptImprovements.map((p) => p.id);
+
+    const sessionNewsRows = await this.prisma.newsItem.findMany({
+      where: { analysisStatus: NewsAnalysisStatus.ANALYZED },
+      orderBy: { publishedAt: 'desc' },
+      take: 25,
+    });
+    const sessionNewsByImpact = groupByImpactLevel(
+      sessionNewsRows.map((n) => ({
+        title: n.title,
+        impactLevel: n.impactLevel,
+        goldImpact: n.goldImpact,
+        publishedAt: n.publishedAt,
+      })),
+    );
 
     for (const newsItem of newsItems) {
       summary.processed++;
@@ -414,6 +432,7 @@ export class OrchestratorService {
           currentPrice: currentPrice.price,
           publishedAt: newsItem.publishedAt,
           promptImprovements,
+          sessionNewsByImpact,
         });
 
         await this.prisma.newsItem.update({
@@ -708,26 +727,29 @@ export class OrchestratorService {
       promptImprovementRows,
     );
 
+    const mapNewsSlice = (n: (typeof pastNews)[number]) => ({
+      id: n.id,
+      title: n.title,
+      publishedAt: n.publishedAt,
+      category: n.category,
+      impactLevel: n.impactLevel,
+      goldImpact: n.goldImpact,
+      analysisSummary: n.analysisSummary,
+    });
+
+    const pastSlices = pastNews.map(mapNewsSlice);
+    const upcomingSlices = upcomingNews.map(mapNewsSlice);
+    const allWindowNews = [...pastSlices, ...upcomingSlices];
+    const windowGrouped = groupByImpactLevel(allWindowNews);
+
     return {
       currentPrice,
-      pastNews: pastNews.map((n) => ({
-        id: n.id,
-        title: n.title,
-        publishedAt: n.publishedAt,
-        category: n.category,
-        impactLevel: n.impactLevel,
-        goldImpact: n.goldImpact,
-        analysisSummary: n.analysisSummary,
-      })),
-      upcomingNews: upcomingNews.map((n) => ({
-        id: n.id,
-        title: n.title,
-        publishedAt: n.publishedAt,
-        category: n.category,
-        impactLevel: n.impactLevel,
-        goldImpact: n.goldImpact,
-        analysisSummary: n.analysisSummary,
-      })),
+      highImpactNews: windowGrouped.highImpactNews,
+      mediumImpactNews: windowGrouped.mediumImpactNews,
+      lowImpactNews: windowGrouped.lowImpactNews,
+      sessionNewsByImpact: windowGrouped,
+      pastNews: pastSlices,
+      upcomingNews: upcomingSlices,
       activePredictions: activePredictions.map((p) => ({
         id: p.id,
         sourceType: p.sourceType,

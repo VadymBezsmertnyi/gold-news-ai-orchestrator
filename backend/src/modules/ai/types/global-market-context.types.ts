@@ -29,15 +29,21 @@ export type GlobalMarketContextResultSlice = {
   newsTitle: string | null;
 };
 
+import type { NewsImpactGroup } from '../utils/news-impact-grouping';
 import type { PromptImprovementSlice } from './prompt-improvement.types';
 
 export type GlobalMarketContextAgentInput = {
   currentPrice: number;
   pastNews: GlobalMarketContextNewsSlice[];
   upcomingNews: GlobalMarketContextNewsSlice[];
+  highImpactNews: GlobalMarketContextNewsSlice[];
+  mediumImpactNews: GlobalMarketContextNewsSlice[];
+  lowImpactNews: GlobalMarketContextNewsSlice[];
   activePredictions: GlobalMarketContextPredictionSlice[];
   recentResults: GlobalMarketContextResultSlice[];
   promptImprovements: PromptImprovementSlice[];
+  /** Full windows grouped by impact (past + upcoming combined). */
+  sessionNewsByImpact?: NewsImpactGroup<GlobalMarketContextNewsSlice>;
 };
 
 export type GlobalMarketContextAgentOutput = {

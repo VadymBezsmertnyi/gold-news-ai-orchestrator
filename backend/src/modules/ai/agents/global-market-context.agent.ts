@@ -22,6 +22,9 @@ export class GlobalMarketContextAgent {
     const payload = JSON.stringify(
       {
         currentPrice: input.currentPrice,
+        highImpactNews: input.highImpactNews,
+        mediumImpactNews: input.mediumImpactNews,
+        lowImpactNews: input.lowImpactNews,
         pastNews: input.pastNews,
         upcomingNews: input.upcomingNews,
         activePredictions: input.activePredictions,
@@ -45,18 +48,28 @@ export class GlobalMarketContextAgent {
       prompt: `
 Analyze the global gold (XAUUSD) context from the data below.
 
+IMPORTANCE HIERARCHY (strict):
+- Summarize and weight news HIGH > MEDIUM > LOW.
+- Do NOT treat all headlines as equal.
+- LOW impact items must not dominate globalBias unless multiple LOW signals align, no HIGH/MEDIUM conflict exists, and context supports it.
+
+Use grouped inputs first:
+- highImpactNews, mediumImpactNews, lowImpactNews
+Then pastNews / upcomingNews for timing context.
+
 Data:
 ${payload}
 
 Rules:
 - globalBias must be BUY, SELL, or NEUTRAL.
+- Explain context prioritizing HIGH impact drivers, then MEDIUM, then LOW only if relevant.
 - confidence is 1-100.
 - expectedMovePercent should be realistic for the timeframe.
 - timeframeMinutes should be 30, 60, 120, 240, or 1440.
-- activeDrivers: short bullet strings (max 6).
+- activeDrivers: short bullet strings (max 6), prefer HIGH/MEDIUM sources.
 - riskNotes: short caution bullets (max 5).
 - Apply HISTORICAL REASONING IMPROVEMENTS from the system prompt only when relevant — they are not market facts.
-- Do not overreact to a single headline if broader context is mixed.
+- Do not overreact to a single LOW impact headline if HIGH/MEDIUM context is mixed.
 
 Return JSON:
 {

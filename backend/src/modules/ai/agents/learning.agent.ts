@@ -57,6 +57,13 @@ You NEVER store market conclusions, geopolitical takes, or event-specific opinio
       prompt: `
 A SINGLE_NEWS prediction FAILED. Diagnose the reasoning/process failure and propose ONE reusable prompt improvement.
 
+Check especially for:
+- impact misclassification (treated LOW as HIGH or vice versa)
+- over-weighting LOW impact news
+- ignoring HIGH/MEDIUM news in the same session
+- confidence too high for LOW-only or weak signals
+- conflicting HIGH/MEDIUM signals ignored (use CONFLICTING_SIGNAL_GAP or SIGNAL_WEIGHTING_GAP)
+
 Data:
 ${payload}
 
