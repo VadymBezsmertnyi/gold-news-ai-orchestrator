@@ -3,19 +3,28 @@ import { NewsAnalysisStatus, type NewsItem, type Prisma } from '@prisma/client';
 
 // common
 import { PrismaService } from '../../common/prisma/prisma.service';
-import { NEWS_SOURCE_FOREX_FACTORY } from '../../constants';
 
 // local
+import { FOREX_FACTORY_SOURCE_FILTER } from './news-forexfactory.constants';
 import { NewsForexFactoryClient } from './news-forexfactory.client';
 import type {
   ForexFactoryNewsEvent,
   NewsDebugSourceResult,
+  SourceSyncStats,
   SyncNewsResult,
 } from './news-forexfactory.types';
 import {
   getNewsSyncFutureHours,
   getNewsSyncPastHours,
 } from './news-sync-window';
+
+const emptySourceStats = (): SourceSyncStats => ({
+  raw: 0,
+  afterWindow: 0,
+  created: 0,
+  updated: 0,
+  skipped: 0,
+});
 
 @Injectable()
 export class NewsService {
@@ -46,136 +55,83 @@ export class NewsService {
   async syncFromForexFactory(): Promise<SyncNewsResult> {
     const fetch = await this.ffClient.fetchMergedGoldNews();
 
-    let created = 0;
-    let updated = 0;
-    let skipped = 0;
+    const indicators = emptySourceStats();
+    indicators.raw = fetch.indicators.raw;
+    indicators.afterWindow = fetch.indicators.afterWindow;
+
+    const news = emptySourceStats();
+    news.raw = fetch.news.raw;
+    news.afterWindow = fetch.news.afterWindow;
 
     for (const event of fetch.events) {
-      const idApi = this.ffClient.resolveIdApi(event);
-      if (!idApi) {
-        skipped++;
-        continue;
-      }
-
-      const mapped = this.mapForexFactoryEvent(event);
-      const externalId = `${NEWS_SOURCE_FOREX_FACTORY}:${idApi}`;
-
-      const existing = await this.prisma.newsItem.findFirst({
-        where: {
-          OR: [{ idApi }, { externalId }],
-        },
-      });
-
-      if (existing) {
-        await this.prisma.newsItem.update({
-          where: { id: existing.id },
-          data: {
-            ...mapped,
-            externalId,
-            idApi,
-            analysisStatus: existing.analysisStatus,
-            analysisSummary: existing.analysisSummary,
-            category: existing.category,
-            impactLevel: existing.impactLevel,
-            goldImpact: existing.goldImpact,
-            analyzedAt: existing.analyzedAt,
-            analysisError: existing.analysisError,
-          },
-        });
-        updated++;
-        continue;
-      }
-
-      await this.prisma.newsItem.create({
-        data: { ...mapped, externalId, idApi },
-      });
-      created++;
+      const stats = event.forexFactoryType === 'INDICATOR' ? indicators : news;
+      const outcome = await this.upsertForexFactoryEvent(event);
+      if (outcome === 'created') stats.created++;
+      else if (outcome === 'updated') stats.updated++;
+      else stats.skipped++;
     }
 
-    const pruned = await this.pruneNewsOutsideSyncWindow();
+    const total: SyncNewsResult['total'] = {
+      raw: fetch.total.raw,
+      afterWindow: fetch.total.afterWindow,
+      afterDedup: fetch.total.afterDedup,
+      created: indicators.created + news.created,
+      updated: indicators.updated + news.updated,
+      skipped: indicators.skipped + news.skipped,
+    };
 
     const result: SyncNewsResult = {
-      fetchedRaw: fetch.fetchedRaw,
-      afterWindow: fetch.afterWindow,
-      afterDedup: fetch.afterDedup,
-      created,
-      updated,
-      skipped,
-      pruned,
-      source: NEWS_SOURCE_FOREX_FACTORY,
-      impactBreakdown: fetch.impactBreakdown,
       timeWindow: fetch.timeWindow,
+      indicators,
+      news,
+      total,
+      impactBreakdown: fetch.impactBreakdown,
     };
 
     this.logger.log(
-      `FF sync: window ${result.timeWindow.from} → ${result.timeWindow.to} raw=${result.fetchedRaw} afterWindow=${result.afterWindow} dedup=${result.afterDedup} +${result.created} ~${result.updated} skip=${result.skipped} pruned=${JSON.stringify(result.pruned)} impact=${JSON.stringify(result.impactBreakdown)}`,
+      `FF sync ${result.timeWindow.from} → ${result.timeWindow.to} ` +
+        `indicators raw=${indicators.raw} window=${indicators.afterWindow} +${indicators.created} ~${indicators.updated} skip=${indicators.skipped} ` +
+        `news raw=${news.raw} window=${news.afterWindow} +${news.created} ~${news.updated} skip=${news.skipped} ` +
+        `total dedup=${total.afterDedup} impact=${JSON.stringify(result.impactBreakdown)}`,
     );
 
     return result;
   }
 
-  /**
-   * Remove ForexFactory news (and linked predictions) outside the rolling sync window.
-   * For manual cleanup see backend/scripts/prune-news-outside-sync-window.sql
-   */
-  async pruneNewsOutsideSyncWindow(): Promise<{
-    newsItems: number;
-    predictions: number;
-    predictionResults: number;
-  }> {
-    const range = this.ffClient.getSyncTimeRange();
-    const outsideWhere = {
-      source: NEWS_SOURCE_FOREX_FACTORY,
-      OR: [
-        { eventStartAt: { lt: range.fromDate } },
-        { eventStartAt: { gt: range.toDate } },
-      ],
-    };
+  private async upsertForexFactoryEvent(
+    event: ForexFactoryNewsEvent,
+  ): Promise<'created' | 'updated' | 'skipped'> {
+    const rawIdApi = this.ffClient.resolveRawIdApi(event);
+    if (!rawIdApi) return 'skipped';
 
-    const staleNews = await this.prisma.newsItem.findMany({
-      where: outsideWhere,
-      select: { id: true },
+    const mapped = this.mapForexFactoryEvent(event, rawIdApi);
+    const { externalId, idApi } = mapped;
+
+    const existing = await this.prisma.newsItem.findFirst({
+      where: {
+        OR: [{ externalId }, { idApi }],
+      },
     });
-    const newsIds = staleNews.map((n) => n.id);
-    if (newsIds.length === 0) {
-      return { newsItems: 0, predictions: 0, predictionResults: 0 };
+
+    if (existing) {
+      await this.prisma.newsItem.update({
+        where: { id: existing.id },
+        data: {
+          ...mapped,
+          analysisStatus: existing.analysisStatus,
+          analysisSummary: existing.analysisSummary,
+          category: existing.category,
+          impactLevel: existing.impactLevel,
+          goldImpact: existing.goldImpact,
+          analyzedAt: existing.analyzedAt,
+          analysisError: existing.analysisError,
+        },
+      });
+      return 'updated';
     }
 
-    const stalePredictions = await this.prisma.prediction.findMany({
-      where: { newsItemId: { in: newsIds } },
-      select: { id: true },
-    });
-    const predictionIds = stalePredictions.map((p) => p.id);
-
-    const predictionResults =
-      predictionIds.length > 0
-        ? await this.prisma.predictionResult.deleteMany({
-            where: { predictionId: { in: predictionIds } },
-          })
-        : { count: 0 };
-
-    const predictions =
-      predictionIds.length > 0
-        ? await this.prisma.prediction.deleteMany({
-            where: { id: { in: predictionIds } },
-          })
-        : { count: 0 };
-
-    const newsItems = await this.prisma.newsItem.deleteMany({
-      where: { id: { in: newsIds } },
-    });
-
-    if (newsItems.count > 0) {
-      this.logger.log(
-        `Pruned outside sync window: news=${newsItems.count} predictions=${predictions.count} results=${predictionResults.count}`,
-      );
-    }
-
-    return {
-      newsItems: newsItems.count,
-      predictions: predictions.count,
-      predictionResults: predictionResults.count,
-    };
+    await this.prisma.newsItem.create({ data: mapped });
+    return 'created';
   }
 
   async getDebugSource(): Promise<NewsDebugSourceResult> {
@@ -187,7 +143,7 @@ export class NewsService {
 
     const saved = await this.prisma.newsItem.findMany({
       where: {
-        source: NEWS_SOURCE_FOREX_FACTORY,
+        source: { in: [...FOREX_FACTORY_SOURCE_FILTER.in] },
         eventStartAt: { gte: fromDate, lte: toDate },
       },
       select: { eventStartAt: true },
@@ -197,29 +153,40 @@ export class NewsService {
     const oldest = saved[0]?.eventStartAt ?? null;
     const newest = saved[saved.length - 1]?.eventStartAt ?? null;
 
+    const mapSample = (e: ForexFactoryNewsEvent, rawId: string | null) => {
+      if (!rawId) return this.mapForexFactoryEvent(e, 'unknown');
+      return this.mapForexFactoryEvent(e, rawId);
+    };
+
     return {
       now: now.toISOString(),
-      from: range.from,
-      to: range.to,
-      rawCount: fetch.fetchedRaw,
-      afterWindowCount: fetch.afterWindow,
-      afterDedupCount: fetch.afterDedup,
-      savedCount: saved.length,
-      oldestSavedEventStartAt: oldest?.toISOString() ?? null,
-      newestSavedEventStartAt: newest?.toISOString() ?? null,
       timeWindow: range,
       syncPastHours: getNewsSyncPastHours(),
       syncFutureHours: getNewsSyncFutureHours(),
-      rawFromApi: {
-        calendar: fetch.calendarRaw,
-        indicators: fetch.indicatorsRaw,
+      indicatorsUrl: fetch.indicatorsUrl,
+      newsUrl: fetch.newsUrl,
+      indicators: {
+        rawCount: fetch.indicators.raw,
+        afterWindowCount: fetch.indicators.afterWindow,
+        afterDedupCount: fetch.indicators.afterDedup,
       },
+      news: {
+        rawCount: fetch.news.raw,
+        afterWindowCount: fetch.news.afterWindow,
+        afterDedupCount: fetch.news.afterDedup,
+      },
+      mergedCount: fetch.total.afterDedup,
+      savedCount: saved.length,
+      oldestSavedEventStartAt: oldest?.toISOString() ?? null,
+      newestSavedEventStartAt: newest?.toISOString() ?? null,
       impactBreakdown: fetch.impactBreakdown,
       samples: {
-        raw: fetch.rawMerged.slice(0, 5),
-        mapped: fetch.events
+        indicators: fetch.indicators.events
           .slice(0, 5)
-          .map((e) => this.mapForexFactoryEvent(e)),
+          .map((e) => mapSample(e, this.ffClient.resolveRawIdApi(e))),
+        news: fetch.news.events
+          .slice(0, 5)
+          .map((e) => mapSample(e, this.ffClient.resolveRawIdApi(e))),
       },
     };
   }
@@ -229,7 +196,7 @@ export class NewsService {
     const title = 'Mock: US CPI beats expectations — gold volatility expected';
     const dateline = Math.floor(now.getTime() / 1000);
     const idApi = `mock-${dateline}`;
-    const externalId = `${NEWS_SOURCE_FOREX_FACTORY}:${idApi}`;
+    const externalId = `mock:${idApi}`;
 
     const existing = await this.prisma.newsItem.findFirst({
       where: { OR: [{ externalId }, { idApi }] },
@@ -274,7 +241,7 @@ export class NewsService {
     const range = this.ffClient.getSyncTimeRange();
     return this.prisma.newsItem.findMany({
       where: {
-        source: NEWS_SOURCE_FOREX_FACTORY,
+        source: { in: [...FOREX_FACTORY_SOURCE_FILTER.in] },
         eventStartAt: {
           gte: range.fromDate,
           lte: range.toDate,
@@ -304,9 +271,8 @@ export class NewsService {
     eventStartAt: Date,
     event?: ForexFactoryNewsEvent,
   ): string {
-    const rawId = event?.idApi ?? event?.id;
-    if (rawId != null && String(rawId).trim() !== '')
-      return `${source}:${String(rawId).trim()}`;
+    const rawId = event ? this.ffClient.resolveRawIdApi(event) : null;
+    if (rawId) return `${source}:${rawId}`;
 
     const slug = title
       .trim()
@@ -316,16 +282,15 @@ export class NewsService {
     return `${source}:${eventStartAt.toISOString()}:${slug}`;
   }
 
-  private mapForexFactoryEvent(event: ForexFactoryNewsEvent): Omit<
-    Prisma.NewsItemCreateInput,
-    'externalId'
-  > & {
-    eventStartAt: Date;
-    source: string;
-    title: string;
-  } {
+  private mapForexFactoryEvent(
+    event: ForexFactoryNewsEvent,
+    rawIdApi: string,
+  ): Prisma.NewsItemCreateInput {
     const eventStartAt = new Date(event.dateline * 1000);
-    const idApi = this.ffClient.resolveIdApi(event) ?? undefined;
+    const source = this.ffClient.sourceForType(event.forexFactoryType);
+    const idApi = this.ffClient.toStoredIdApi(event.forexFactoryType, rawIdApi);
+    const externalId = `${source}:${rawIdApi}`;
+
     const summaryParts = [
       event.country ? `country: ${event.country}` : null,
       (event.impact_name ?? event.impact)
@@ -335,8 +300,15 @@ export class NewsService {
       event.previous ? `previous: ${event.previous}` : null,
     ].filter(Boolean);
 
+    const rawPayload = {
+      ...event,
+      idApi: rawIdApi,
+      forexFactoryType: event.forexFactoryType,
+    };
+
     return {
       idApi,
+      externalId,
       dateline: event.dateline,
       eventStartAt,
       impactValue: event.impact_value,
@@ -344,13 +316,13 @@ export class NewsService {
       previous: event.previous ?? undefined,
       eventTime: event.time ?? undefined,
       eventDate: event.date ?? undefined,
-      source: NEWS_SOURCE_FOREX_FACTORY,
+      source,
       title: event.title,
       url: event.details_url,
       summary: summaryParts.length > 0 ? summaryParts.join(' | ') : undefined,
       publishedAt: eventStartAt,
       analysisStatus: NewsAnalysisStatus.PENDING,
-      rawPayload: event as unknown as Prisma.InputJsonValue,
+      rawPayload: rawPayload as unknown as Prisma.InputJsonValue,
     };
   }
 }

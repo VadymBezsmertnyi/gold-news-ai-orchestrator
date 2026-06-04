@@ -1,3 +1,5 @@
+export type ForexFactorySourceType = 'INDICATOR' | 'NEWS';
+
 export interface ForexFactoryNewsEvent {
   idApi?: string;
   id?: number | string;
@@ -12,6 +14,7 @@ export interface ForexFactoryNewsEvent {
   forecast?: string;
   previous?: string;
   details_url?: string;
+  forexFactoryType: ForexFactorySourceType;
 }
 
 export interface NewsApiResponse {
@@ -47,55 +50,69 @@ export interface ImpactBreakdown {
   other: number;
 }
 
-export interface ForexFactoryFetchResult {
-  calendarRaw: number;
-  indicatorsRaw: number;
-  fetchedRaw: number;
+export interface SourceFetchSlice {
+  raw: number;
   afterWindow: number;
   afterDedup: number;
-  timeWindow: SyncTimeWindow;
-  impactBreakdown: ImpactBreakdown;
   events: ForexFactoryNewsEvent[];
-  rawMerged: ForexFactoryNewsEvent[];
+  rawInWindow: ForexFactoryNewsEvent[];
 }
 
-export interface SyncNewsResult {
-  fetchedRaw: number;
+export interface ForexFactoryFetchResult {
+  timeWindow: SyncTimeWindow;
+  indicatorsUrl: string;
+  newsUrl: string;
+  indicators: SourceFetchSlice;
+  news: SourceFetchSlice;
+  total: {
+    raw: number;
+    afterWindow: number;
+    afterDedup: number;
+  };
+  impactBreakdown: ImpactBreakdown;
+  events: ForexFactoryNewsEvent[];
+}
+
+export interface SourceSyncStats {
+  raw: number;
   afterWindow: number;
-  afterDedup: number;
   created: number;
   updated: number;
   skipped: number;
-  pruned: {
-    newsItems: number;
-    predictions: number;
-    predictionResults: number;
-  };
-  source: string;
-  impactBreakdown: ImpactBreakdown;
+}
+
+export interface SyncNewsResult {
   timeWindow: SyncTimeWindow;
+  indicators: SourceSyncStats;
+  news: SourceSyncStats;
+  total: SourceSyncStats & { afterDedup: number };
+  impactBreakdown: ImpactBreakdown;
 }
 
 export interface NewsDebugSourceResult {
   now: string;
-  from: string;
-  to: string;
-  rawCount: number;
-  afterWindowCount: number;
-  afterDedupCount: number;
-  savedCount: number;
-  oldestSavedEventStartAt: string | null;
-  newestSavedEventStartAt: string | null;
   timeWindow: SyncTimeWindow;
   syncPastHours: number;
   syncFutureHours: number;
-  rawFromApi: {
-    calendar: number;
-    indicators: number;
+  indicatorsUrl: string;
+  newsUrl: string;
+  indicators: {
+    rawCount: number;
+    afterWindowCount: number;
+    afterDedupCount: number;
   };
+  news: {
+    rawCount: number;
+    afterWindowCount: number;
+    afterDedupCount: number;
+  };
+  mergedCount: number;
+  savedCount: number;
+  oldestSavedEventStartAt: string | null;
+  newestSavedEventStartAt: string | null;
   impactBreakdown: ImpactBreakdown;
   samples: {
-    raw: ForexFactoryNewsEvent[];
-    mapped: Array<Record<string, unknown>>;
+    indicators: Array<Record<string, unknown>>;
+    news: Array<Record<string, unknown>>;
   };
 }

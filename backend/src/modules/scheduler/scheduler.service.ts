@@ -57,19 +57,14 @@ export class SchedulerService implements OnModuleInit {
         'Scheduled news sync completed',
         {
           timeWindow: { ...result.timeWindow },
-          fetchedRaw: result.fetchedRaw,
-          afterWindow: result.afterWindow,
-          afterDedup: result.afterDedup,
-          created: result.created,
-          updated: result.updated,
-          skipped: result.skipped,
-          pruned: { ...result.pruned },
-          source: result.source,
+          indicators: { ...result.indicators },
+          news: { ...result.news },
+          total: { ...result.total },
           impactBreakdown: { ...result.impactBreakdown },
         } satisfies Prisma.InputJsonObject,
       );
       this.logger.log(
-        `News sync: window=${result.afterWindow} dedup=${result.afterDedup} raw=${result.fetchedRaw} +${result.created} ~${result.updated} skip=${result.skipped}`,
+        `News sync: indicators +${result.indicators.created}/~${result.indicators.updated} news +${result.news.created}/~${result.news.updated} total dedup=${result.total.afterDedup}`,
       );
     } catch (error) {
       const message =

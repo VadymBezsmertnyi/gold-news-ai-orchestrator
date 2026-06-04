@@ -2,9 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios, { type AxiosInstance } from 'axios';
 
 // local
+import {
+  FF_BASE_URL,
+  NEWS_API_URL,
+  NEWS_SOURCE_FOREX_FACTORY_INDICATOR,
+  NEWS_SOURCE_FOREX_FACTORY_NEWS,
+} from './news-forexfactory.constants';
 import type {
   ForexFactoryFetchResult,
   ForexFactoryNewsEvent,
+  ForexFactorySourceType,
   ImpactBreakdown,
   IndicatorsApiResponse,
   NewsApiResponse,
@@ -14,9 +21,6 @@ import {
   getNewsSyncFutureHours,
   getNewsSyncPastHours,
 } from './news-sync-window';
-
-const FF_BASE_URL = 'https://www.forexfactory.com';
-const NEWS_API_URL = `${FF_BASE_URL}/calendar/upcoming/instrument/GoldUSD?limit=100`;
 
 @Injectable()
 export class NewsForexFactoryClient {
@@ -31,9 +35,21 @@ export class NewsForexFactoryClient {
     },
   });
 
-  /**
-   * Rolling window on eventStartAt (ForexFactory dateline): now − past … now + future.
-   */
+  getNewsApiUrl(): string {
+    return NEWS_API_URL;
+  }
+
+  /** Same as XauSync `getIndicatorsApiUrl`. */
+  getIndicatorsApiUrl(fromDate?: Date, toDate?: Date): string {
+    const now = toDate ?? new Date();
+    const from = fromDate ?? new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const fromTimestamp = Math.floor(from.getTime() / 1000);
+    return `${FF_BASE_URL.replace(
+      'www',
+      'mds-api',
+    )}/indicators/news?instrument=Gold%2FUSD&interval=M15&from=${fromTimestamp}&site_id=1`;
+  }
+
   getSyncTimeRange(now = new Date()): SyncTimeWindow & {
     fromDate: Date;
     toDate: Date;
@@ -55,42 +71,19 @@ export class NewsForexFactoryClient {
     };
   }
 
-  private getIndicatorsApiUrl(fromDate: Date, toDate: Date): string {
-    const fromTimestamp = Math.floor(fromDate.getTime() / 1000);
-    return `${FF_BASE_URL.replace(
-      'www',
-      'mds-api',
-    )}/indicators/news?instrument=Gold%2FUSD&interval=M15&from=${fromTimestamp}&site_id=1`;
-  }
-
-  async fetchCalendarEvents(): Promise<NewsApiResponse> {
-    try {
-      const response = await this.http.get<NewsApiResponse>(NEWS_API_URL);
-      return response.data;
-    } catch (error: unknown) {
-      const status = axios.isAxiosError(error)
-        ? error.response?.status
-        : undefined;
-      if (status === 403) {
-        this.logger.warn(
-          'Forex Factory calendar API returned 403 — returning empty list',
-        );
-        return { events: [] };
-      }
-      throw error;
-    }
-  }
-
-  async fetchIndicatorEvents(
-    fromDate: Date,
-    toDate: Date,
+  /**
+   * XauSync: `fetchIndicatorsDataToNewsEvents` — scheduled calendar indicators.
+   */
+  async fetchIndicatorsDataToNewsEvents(
+    fromDate?: Date,
+    toDate?: Date,
   ): Promise<NewsApiResponse> {
     const url = this.getIndicatorsApiUrl(fromDate, toDate);
     try {
       const response = await this.http.get<IndicatorsApiResponse>(url);
       const events: ForexFactoryNewsEvent[] = response.data.data.map(
         (item) => ({
-          idApi: String(item.id),
+          idApi: item.id.toString(),
           title: item.title,
           impact_value: item.impact_value,
           dateline: item.timestamp,
@@ -103,6 +96,7 @@ export class NewsForexFactoryClient {
           impact: item.impact,
           impact_name: item.impact,
           details_url: item.url ? `${FF_BASE_URL}${item.url}` : undefined,
+          forexFactoryType: 'INDICATOR' as const,
         }),
       );
       return { events, has_more: false };
@@ -112,26 +106,47 @@ export class NewsForexFactoryClient {
         : undefined;
       if (status === 403) {
         this.logger.warn(
-          'Forex Factory indicators API returned 403 — returning empty list',
+          `Forex Factory indicators API returned 403 — using cached DB data. URL: ${url}`,
         );
-        return { events: [] };
+        return { events: [], has_more: false };
       }
+      this.logger.error('Error fetching indicators data', error);
       throw error;
     }
   }
 
-  dedupeByIdApi(events: ForexFactoryNewsEvent[]): ForexFactoryNewsEvent[] {
-    const byId = new Map<string, ForexFactoryNewsEvent>();
-    for (const event of events) {
-      const idApi = this.resolveIdApi(event);
-      if (!idApi) continue;
-      const prev = byId.get(idApi);
-      byId.set(
-        idApi,
-        prev ? { ...prev, ...event, idApi } : { ...event, idApi },
+  /**
+   * XauSync: `fetchNewsEvents` — regular news headlines (calendar upcoming).
+   */
+  async fetchNewsEvents(): Promise<NewsApiResponse> {
+    try {
+      const response = await this.http.get<NewsApiResponse>(NEWS_API_URL);
+      const events: ForexFactoryNewsEvent[] = response.data.events.map(
+        (event) => ({
+          ...event,
+          idApi:
+            event.idApi != null
+              ? String(event.idApi)
+              : event.id != null
+                ? String(event.id)
+                : undefined,
+          forexFactoryType: 'NEWS' as const,
+        }),
       );
+      return { events, has_more: response.data.has_more };
+    } catch (error: unknown) {
+      const status = axios.isAxiosError(error)
+        ? error.response?.status
+        : undefined;
+      if (status === 403) {
+        this.logger.warn(
+          `Forex Factory news API returned 403 — using cached DB data. URL: ${NEWS_API_URL}`,
+        );
+        return { events: [], has_more: false };
+      }
+      this.logger.error('Error fetching news events', error);
+      throw error;
     }
-    return [...byId.values()];
   }
 
   filterByTimeWindow(
@@ -142,6 +157,78 @@ export class NewsForexFactoryClient {
     return events.filter(
       (event) => event.dateline >= fromSec && event.dateline <= toSec,
     );
+  }
+
+  normalizeTitle(title: string): string {
+    return title
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .slice(0, 120);
+  }
+
+  resolveRawIdApi(event: ForexFactoryNewsEvent): string | null {
+    const raw = event.idApi ?? event.id;
+    if (raw == null) return null;
+    const id = String(raw).trim();
+    return id.length > 0 ? id : null;
+  }
+
+  /** Stored idApi — scoped by source type so indicator/news ids never collide. */
+  toStoredIdApi(sourceType: ForexFactorySourceType, rawIdApi: string): string {
+    return `${sourceType.toLowerCase()}:${rawIdApi}`;
+  }
+
+  sourceForType(sourceType: ForexFactorySourceType): string {
+    return sourceType === 'INDICATOR'
+      ? NEWS_SOURCE_FOREX_FACTORY_INDICATOR
+      : NEWS_SOURCE_FOREX_FACTORY_NEWS;
+  }
+
+  externalIdForEvent(event: ForexFactoryNewsEvent): string | null {
+    const rawId = this.resolveRawIdApi(event);
+    if (!rawId) return null;
+    return `${this.sourceForType(event.forexFactoryType)}:${rawId}`;
+  }
+
+  /**
+   * Dedup priority: idApi+sourceType → externalId → dateline+normalized title (per type).
+   */
+  dedupeEvents(events: ForexFactoryNewsEvent[]): ForexFactoryNewsEvent[] {
+    const byPrimary = new Map<string, ForexFactoryNewsEvent>();
+    const externalAlias = new Map<string, string>();
+    const titleAlias = new Map<string, string>();
+
+    for (const event of events) {
+      const rawId = this.resolveRawIdApi(event);
+      const type = event.forexFactoryType;
+      const titleKey = `${event.dateline}:${this.normalizeTitle(event.title)}:${type}`;
+      const externalId = rawId ? `${this.sourceForType(type)}:${rawId}` : null;
+
+      let primaryKey = rawId ? `id:${rawId}:${type}` : `title:${titleKey}`;
+
+      if (externalId && externalAlias.has(externalId)) {
+        primaryKey = externalAlias.get(externalId)!;
+      } else if (titleAlias.has(titleKey)) {
+        primaryKey = titleAlias.get(titleKey)!;
+      }
+
+      const prev = byPrimary.get(primaryKey);
+      const merged: ForexFactoryNewsEvent = prev
+        ? {
+            ...prev,
+            ...event,
+            idApi: rawId ?? prev.idApi,
+            forexFactoryType: type,
+          }
+        : { ...event, idApi: rawId ?? event.idApi, forexFactoryType: type };
+
+      byPrimary.set(primaryKey, merged);
+      if (externalId) externalAlias.set(externalId, primaryKey);
+      titleAlias.set(titleKey, primaryKey);
+    }
+
+    return [...byPrimary.values()];
   }
 
   computeImpactBreakdown(events: ForexFactoryNewsEvent[]): ImpactBreakdown {
@@ -162,49 +249,74 @@ export class NewsForexFactoryClient {
     return breakdown;
   }
 
-  resolveIdApi(event: ForexFactoryNewsEvent): string | null {
-    const raw = event.idApi ?? event.id;
-    if (raw == null) return null;
-    const id = String(raw).trim();
-    return id.length > 0 ? id : null;
-  }
-
   /**
-   * Merge calendar upcoming + indicators API; keep only events in the rolling sync window.
+   * XauSync strategy: indicators + news APIs, rolling window on dateline, then dedupe.
    */
-  async fetchMergedGoldNews(now = new Date()): Promise<ForexFactoryFetchResult> {
+  async fetchMergedGoldNews(
+    now = new Date(),
+  ): Promise<ForexFactoryFetchResult> {
     const range = this.getSyncTimeRange(now);
-    const [calendar, indicators] = await Promise.all([
-      this.fetchCalendarEvents(),
-      this.fetchIndicatorEvents(range.fromDate, range.toDate),
+    const indicatorsUrl = this.getIndicatorsApiUrl(
+      range.fromDate,
+      range.toDate,
+    );
+    const newsUrl = this.getNewsApiUrl();
+
+    const [indicatorsResponse, newsResponse] = await Promise.all([
+      this.fetchIndicatorsDataToNewsEvents(range.fromDate, range.toDate),
+      this.fetchNewsEvents(),
     ]);
 
-    const calendarRaw = calendar.events.length;
-    const indicatorsRaw = indicators.events.length;
-    const fetchedRaw = calendarRaw + indicatorsRaw;
-    const rawMerged = [...calendar.events, ...indicators.events];
-    const inWindow = this.filterByTimeWindow(
-      rawMerged,
+    const indicatorsRaw = indicatorsResponse.events;
+    const newsRaw = newsResponse.events;
+
+    const indicatorsInWindow = this.filterByTimeWindow(
+      indicatorsRaw,
       range.fromSec,
       range.toSec,
     );
-    const events = this.dedupeByIdApi(inWindow);
+    const newsInWindow = this.filterByTimeWindow(
+      newsRaw,
+      range.fromSec,
+      range.toSec,
+    );
+
+    const indicatorsDeduped = this.dedupeEvents(indicatorsInWindow);
+    const newsDeduped = this.dedupeEvents(newsInWindow);
+
+    const mergedInWindow = [...indicatorsInWindow, ...newsInWindow];
+    const events = this.dedupeEvents(mergedInWindow);
 
     return {
-      calendarRaw,
-      indicatorsRaw,
-      fetchedRaw,
-      afterWindow: inWindow.length,
-      afterDedup: events.length,
       timeWindow: {
         from: range.from,
         to: range.to,
         fromSec: range.fromSec,
         toSec: range.toSec,
       },
+      indicatorsUrl,
+      newsUrl,
+      indicators: {
+        raw: indicatorsRaw.length,
+        afterWindow: indicatorsInWindow.length,
+        afterDedup: indicatorsDeduped.length,
+        events: indicatorsDeduped,
+        rawInWindow: indicatorsInWindow,
+      },
+      news: {
+        raw: newsRaw.length,
+        afterWindow: newsInWindow.length,
+        afterDedup: newsDeduped.length,
+        events: newsDeduped,
+        rawInWindow: newsInWindow,
+      },
+      total: {
+        raw: indicatorsRaw.length + newsRaw.length,
+        afterWindow: mergedInWindow.length,
+        afterDedup: events.length,
+      },
       impactBreakdown: this.computeImpactBreakdown(events),
       events,
-      rawMerged,
     };
   }
 }
