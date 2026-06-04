@@ -1,15 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
-import axios, { type AxiosInstance } from 'axios';
 
 // local
 import {
   FF_BASE_URL,
-  FF_MDS_BASE_URL,
   NEWS_CALENDAR_API_URL,
   NEWS_SOURCE_FOREX_FACTORY_INDICATOR,
   NEWS_SOURCE_FOREX_FACTORY_NEWS,
 } from './news-forexfactory.constants';
-import { buildForexFactoryHeaders } from './news-forexfactory.http-config';
+import { forexFactoryGetJson } from './news-forexfactory.fetch';
 import type {
   ForexFactoryApiStatus,
   ForexFactoryFetchResult,
@@ -35,12 +33,6 @@ export interface ForexFactoryApiFetchResult {
 export class NewsForexFactoryClient {
   private readonly logger = new Logger(NewsForexFactoryClient.name);
 
-  private readonly http: AxiosInstance = axios.create({
-    timeout: 15_000,
-    maxRedirects: 5,
-    headers: buildForexFactoryHeaders(),
-  });
-
   getNewsCalendarApiUrl(): string {
     return NEWS_CALENDAR_API_URL;
   }
@@ -58,7 +50,7 @@ export class NewsForexFactoryClient {
     const now = toDate ?? new Date();
     const from = fromDate ?? new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const fromTimestamp = Math.floor(from.getTime() / 1000);
-    return `${FF_MDS_BASE_URL}/indicators/news?instrument=Gold%2FUSD&interval=M15&from=${fromTimestamp}&site_id=1`;
+    return `${FF_BASE_URL.replace('www', 'mds-api')}/indicators/news?instrument=Gold%2FUSD&interval=M15&from=${fromTimestamp}&site_id=1`;
   }
 
   getMdsApiUrl(fromDate?: Date, toDate?: Date): string {
@@ -107,8 +99,11 @@ export class NewsForexFactoryClient {
   ): Promise<ForexFactoryApiFetchResult> {
     const url = this.getMdsApiUrl(fromDate, toDate);
     try {
-      const response = await this.http.get<IndicatorsApiResponse>(url);
-      const events: ForexFactoryNewsEvent[] = response.data.data.map((item) => {
+      const { data } = await forexFactoryGetJson<IndicatorsApiResponse>(
+        'mds-api/indicators/news',
+        url,
+      );
+      const events: ForexFactoryNewsEvent[] = data.data.map((item) => {
         const type = this.classifyMdsEventType(item.url);
         return {
           idApi: item.id.toString(),
@@ -136,13 +131,15 @@ export class NewsForexFactoryClient {
       );
       return { events, apiStatus: 'ok', apiUrl: url };
     } catch (error: unknown) {
-      const status = axios.isAxiosError(error)
-        ? error.response?.status
-        : undefined;
+      const status =
+        typeof error === 'object' &&
+        error !== null &&
+        'status' in error &&
+        typeof (error as { status: unknown }).status === 'number'
+          ? (error as { status: number }).status
+          : undefined;
       if (status === 403) {
-        this.logger.warn(
-          `Forex Factory indicators API returned 403 — using cached DB data. URL: ${url}`,
-        );
+        this.logger.warn(`mds-api forbidden — DB fallback. URL: ${url}`);
         return { events: [], apiStatus: 'forbidden', apiUrl: url };
       }
       this.logger.error('Error fetching mds-api news data', error);
@@ -156,26 +153,34 @@ export class NewsForexFactoryClient {
   async fetchNewsEvents(): Promise<ForexFactoryApiFetchResult> {
     const url = this.getNewsCalendarApiUrl();
     try {
-      const response = await this.http.get<NewsApiResponse>(url);
-      const events: ForexFactoryNewsEvent[] = response.data.events.map(
-        (event) => ({
-          ...event,
-          idApi:
-            event.idApi != null
-              ? String(event.idApi)
-              : event.id != null
-                ? String(event.id)
-                : undefined,
-          forexFactoryType: 'NEWS' as const,
-        }),
+      const { data } = await forexFactoryGetJson<NewsApiResponse>(
+        'calendar/upcoming',
+        url,
       );
+      const events: ForexFactoryNewsEvent[] = data.events.map((event) => ({
+        ...event,
+        idApi:
+          event.idApi != null
+            ? String(event.idApi)
+            : event.id != null
+              ? String(event.id)
+              : undefined,
+        forexFactoryType: 'NEWS' as const,
+      }));
       this.logger.log(`calendar/upcoming: ${events.length} events`);
       return { events, apiStatus: 'ok', apiUrl: url };
     } catch (error: unknown) {
-      const status = axios.isAxiosError(error)
-        ? error.response?.status
-        : undefined;
+      const status =
+        typeof error === 'object' &&
+        error !== null &&
+        'status' in error &&
+        typeof (error as { status: unknown }).status === 'number'
+          ? (error as { status: number }).status
+          : undefined;
       if (status === 403) {
+        this.logger.warn(
+          `calendar/upcoming forbidden (403) — DB fallback. URL: ${url}`,
+        );
         return { events: [], apiStatus: 'forbidden', apiUrl: url };
       }
       this.logger.error('Error fetching calendar news events', error);
