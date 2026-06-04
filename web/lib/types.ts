@@ -16,6 +16,8 @@ export interface DashboardPredictionRow {
   expectedMovePercent: number | null;
   timeframeMinutes: number;
   status: string;
+  priceAtPrediction: number | null;
+  checkAfter: string;
   priceBefore: number | null;
   priceAfter: number | null;
   result: string | null;
@@ -32,6 +34,15 @@ export interface DashboardNewsRow {
   goldImpact: string | null;
   analysisSummary: string | null;
   analyzedAt: string | null;
+}
+
+export interface DashboardServerLogRow {
+  id: string;
+  type: string;
+  message: string;
+  level: string;
+  meta: unknown;
+  createdAt: string;
 }
 
 export interface GlobalContextPlaceholder {
@@ -64,6 +75,8 @@ export interface DashboardResponse {
   stats: DashboardStats;
   recentPredictions: DashboardPredictionRow[];
   recentNews: DashboardNewsRow[];
+  recentServerLogs: DashboardServerLogRow[];
+  lastNewsSyncAt: string | null;
   globalContext: GlobalContextPlaceholder;
   learningRules: LearningRule[];
   orchestratorNote: string;
