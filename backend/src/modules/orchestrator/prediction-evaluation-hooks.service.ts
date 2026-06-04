@@ -96,7 +96,10 @@ export class PredictionEvaluationHooksService implements PredictionEvaluationHan
         orderBy: { publishedAt: 'desc' },
         take: 8,
       });
-      const activeLearningRules = await this.learningService.findActive();
+      const activeRules =
+        await this.learningService.findActivePromptImprovements();
+      const activePromptImprovements =
+        this.learningService.toPromptImprovementSlices(activeRules);
 
       const output = await this.learningAgent.run({
         news,
@@ -112,29 +115,33 @@ export class PredictionEvaluationHooksService implements PredictionEvaluationHan
           goldImpact: n.goldImpact,
           analysisSummary: n.analysisSummary,
         })),
-        activeLearningRules,
+        activePromptImprovements,
       });
 
       if (
-        !output.shouldCreateRule ||
-        output.confidence < this.learningMinConfidence
+        !output.shouldCreateImprovement ||
+        output.confidence < this.learningMinConfidence ||
+        !output.promptImprovement?.trim()
       ) {
-        await this.logLearningSkipped(output.reason, prediction.id);
+        await this.logLearningSkipped(
+          output.rootCause || 'improvement_not_created',
+          prediction.id,
+        );
         return;
       }
 
-      await this.learningService.createFromFailedPrediction(
+      const created = await this.learningService.createFromFailedPrediction(
         prediction.id,
-        output.title,
-        output.description,
+        output,
       );
 
       await this.serverLogsService.info(
         SERVER_LOG_TYPES.LEARNING_RULE_CREATED,
-        'Learning rule created',
+        'Prompt improvement created',
         {
           predictionId: prediction.id,
-          title: output.title,
+          improvementId: created.id,
+          problemType: output.problemType,
           confidence: output.confidence,
         },
       );
@@ -156,7 +163,7 @@ export class PredictionEvaluationHooksService implements PredictionEvaluationHan
   ): Promise<void> {
     await this.serverLogsService.info(
       SERVER_LOG_TYPES.LEARNING_SKIPPED,
-      'Learning rule not created',
+      'Prompt improvement not created',
       { predictionId, reason },
     );
   }

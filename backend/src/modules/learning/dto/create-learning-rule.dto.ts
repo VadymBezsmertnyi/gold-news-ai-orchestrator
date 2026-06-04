@@ -1,6 +1,8 @@
 export class CreateLearningRuleDto {
-  title!: string;
-  description!: string;
+  problemType!: string;
+  rootCause!: string;
+  promptImprovement!: string;
+  confidence?: number;
   sourcePredictionId?: string;
   isActive?: boolean;
 }

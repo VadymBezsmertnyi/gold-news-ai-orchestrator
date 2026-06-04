@@ -1,9 +1,6 @@
-import type {
-  LearningRule,
-  NewsItem,
-  Prediction,
-  PredictionResult,
-} from '@prisma/client';
+import type { NewsItem, Prediction, PredictionResult } from '@prisma/client';
+
+import type { PromptImprovementSlice } from './prompt-improvement.types';
 
 export type LearningAgentNewsSlice = {
   id: string;
@@ -21,13 +18,13 @@ export type LearningAgentInput = {
   result: PredictionResult;
   currentPrice: number;
   recentNews: LearningAgentNewsSlice[];
-  activeLearningRules: Pick<LearningRule, 'id' | 'title' | 'description'>[];
+  activePromptImprovements: PromptImprovementSlice[];
 };
 
 export type LearningAgentOutput = {
-  shouldCreateRule: boolean;
-  title: string;
-  description: string;
+  shouldCreateImprovement: boolean;
+  problemType: string;
+  rootCause: string;
+  promptImprovement: string;
   confidence: number;
-  reason: string;
 };

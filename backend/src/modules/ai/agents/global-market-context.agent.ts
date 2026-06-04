@@ -21,7 +21,7 @@ export class GlobalMarketContextAgent {
         upcomingNews: input.upcomingNews,
         activePredictions: input.activePredictions,
         recentResults: input.recentResults,
-        learningRules: input.learningRules,
+        promptImprovements: input.promptImprovements,
       },
       null,
       0,
@@ -47,7 +47,7 @@ Rules:
 - timeframeMinutes should be 30, 60, 120, 240, or 1440.
 - activeDrivers: short bullet strings (max 6).
 - riskNotes: short caution bullets (max 5).
-- Learning rules are historical observations, not absolute truth.
+- promptImprovements are reusable reasoning adjustments for synthesis — NOT current market facts or headlines. Use them to improve decision quality cautiously.
 - Do not overreact to a single headline if broader context is mixed.
 
 Return JSON:

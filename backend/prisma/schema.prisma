@@ -143,14 +143,22 @@ model PredictionResult {
   prediction Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade)
 }
 
+/// Reusable prompt/reasoning improvements — not temporary market observations.
 model LearningRule {
   id                 String   @id @default(cuid())
-  title              String
-  description        String
+  problemType        String?
+  rootCause          String?
+  promptImprovement  String?
+  confidence         Int?
+  title              String?
+  description        String?
   sourcePredictionId String?
   isActive           Boolean  @default(true)
+  isDeprecated       Boolean  @default(false)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+
+  @@index([isActive, isDeprecated])
 }
 
 model ServerLog {

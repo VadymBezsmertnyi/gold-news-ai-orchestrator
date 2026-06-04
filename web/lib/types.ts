@@ -79,14 +79,21 @@ export interface DashboardGlobalContext {
   createdAt: string;
 }
 
-export interface LearningRule {
+export interface DashboardPromptImprovement {
   id: string;
-  title: string;
-  description: string;
+  problemType: string;
+  rootCause: string;
+  promptImprovement: string;
+  confidence: number | null;
   sourcePredictionId: string | null;
-  isActive: boolean;
   createdAt: string;
-  updatedAt: string;
+}
+
+export interface DashboardDeprecatedLearningRule {
+  id: string;
+  title: string | null;
+  description: string | null;
+  createdAt: string;
 }
 
 export interface DashboardResponse {
@@ -98,6 +105,7 @@ export interface DashboardResponse {
   recentServerLogs: DashboardServerLogRow[];
   lastNewsSyncAt: string | null;
   globalContext: DashboardGlobalContext | null;
-  learningRules: LearningRule[];
+  promptImprovements: DashboardPromptImprovement[];
+  deprecatedLearningRules: DashboardDeprecatedLearningRule[];
   orchestratorNote: string;
 }

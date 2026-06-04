@@ -29,11 +29,7 @@ export type GlobalMarketContextResultSlice = {
   newsTitle: string | null;
 };
 
-export type GlobalMarketContextLearningRuleSlice = {
-  id: string;
-  title: string;
-  description: string;
-};
+import type { PromptImprovementSlice } from './prompt-improvement.types';
 
 export type GlobalMarketContextAgentInput = {
   currentPrice: number;
@@ -41,7 +37,7 @@ export type GlobalMarketContextAgentInput = {
   upcomingNews: GlobalMarketContextNewsSlice[];
   activePredictions: GlobalMarketContextPredictionSlice[];
   recentResults: GlobalMarketContextResultSlice[];
-  learningRules: GlobalMarketContextLearningRuleSlice[];
+  promptImprovements: PromptImprovementSlice[];
 };
 
 export type GlobalMarketContextAgentOutput = {

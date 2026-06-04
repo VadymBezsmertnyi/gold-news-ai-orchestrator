@@ -479,40 +479,79 @@ function GlobalContextCard({ ctx }: { ctx: DashboardGlobalContext }) {
   );
 }
 
-function LearningRulesList({
-  rules,
+function PromptImprovementsList({
+  items,
 }: {
-  rules: DashboardResponse["learningRules"];
+  items: DashboardResponse["promptImprovements"];
 }) {
-  if (rules.length === 0)
+  if (items.length === 0)
     return (
       <p className="text-xs text-zinc-500">
-        Правила зʼявляться після невдалих прогнозів (якщо агент навчання їх
-        створить).
+        Покращення зʼявляться після невдалих прогнозів, якщо агент навчання
+        знайде узагальнену помилку міркування (не висновок про ринок).
       </p>
     );
 
   return (
     <ul className="space-y-2">
+      {items.map((item) => (
+        <li
+          key={item.id}
+          className="rounded-lg border border-violet-200/80 bg-violet-50/40 px-3 py-2 text-xs"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-violet-900">
+              {item.problemType}
+            </span>
+            {item.confidence != null ? (
+              <span className="text-[10px] text-violet-700">
+                впевненість {item.confidence}%
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 text-zinc-600">
+            <span className="font-medium text-zinc-700">Причина: </span>
+            {item.rootCause}
+          </p>
+          <p className="mt-1 text-zinc-800">
+            <span className="font-medium text-zinc-700">Покращення: </span>
+            {item.promptImprovement}
+          </p>
+          <p className="mt-1 text-[10px] text-zinc-500">
+            {formatDateTimeUk(item.createdAt)}
+            {item.sourcePredictionId
+              ? ` · прогноз ${item.sourcePredictionId.slice(0, 8)}…`
+              : ""}
+          </p>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function DeprecatedLearningRulesList({
+  rules,
+}: {
+  rules: DashboardResponse["deprecatedLearningRules"];
+}) {
+  if (rules.length === 0) return null;
+
+  return (
+    <ul className="mt-2 space-y-2">
       {rules.map((rule) => (
         <li
           key={rule.id}
-          className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs"
+          className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs opacity-75"
         >
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-zinc-900">{rule.title}</span>
-            {rule.isActive ? (
-              <StatusBadge label="Активне" tone="ok" />
-            ) : (
-              <StatusBadge label="Неактивне" tone="muted" />
-            )}
+            <span className="font-medium text-zinc-700 line-through">
+              {rule.title ?? "Без назви"}
+            </span>
+            <StatusBadge label="Застаріле" tone="muted" />
           </div>
-          <p className="mt-1 text-zinc-600">{rule.description}</p>
-          <p className="mt-1 text-[10px] text-zinc-500">
-            {formatDateTimeUk(rule.createdAt)}
-            {rule.sourcePredictionId
-              ? ` · прогноз ${rule.sourcePredictionId.slice(0, 8)}…`
-              : ""}
+          <p className="mt-1 text-zinc-500">{rule.description ?? "—"}</p>
+          <p className="mt-1 text-[10px] text-zinc-400">
+            {formatDateTimeUk(rule.createdAt)} · не використовується в промптах
           </p>
         </li>
       ))}
@@ -673,8 +712,18 @@ export default function DashboardClient() {
             ) : null}
 
             <section>
-              <SectionTitle>{SECTION_TITLES.learningRules}</SectionTitle>
-              <LearningRulesList rules={dashboard.learningRules} />
+              <SectionTitle>{SECTION_TITLES.promptImprovements}</SectionTitle>
+              <PromptImprovementsList items={dashboard.promptImprovements} />
+              {dashboard.deprecatedLearningRules.length > 0 ? (
+                <>
+                  <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                    {SECTION_TITLES.deprecatedRules}
+                  </p>
+                  <DeprecatedLearningRulesList
+                    rules={dashboard.deprecatedLearningRules}
+                  />
+                </>
+              ) : null}
             </section>
 
             <section>

@@ -36,13 +36,17 @@ export class MockProvider implements LlmProvider {
         riskNotes: ['mock_volatility'],
       } as T;
 
-    if (prompt.includes('shouldcreaterule') || prompt.includes('post-mortem'))
+    if (
+      prompt.includes('shouldcreateimprovement') ||
+      prompt.includes('prompt improvement') ||
+      prompt.includes('post-mortem')
+    )
       return {
-        shouldCreateRule: false,
-        title: 'Mock learning skip',
-        description: 'Mock: no new rule for demo failure.',
+        shouldCreateImprovement: false,
+        problemType: 'MOCK_SKIP',
+        rootCause: 'Mock: no reusable improvement for demo failure.',
+        promptImprovement: '',
         confidence: 40,
-        reason: 'Mock learning agent — pattern not strong enough.',
       } as T;
 
     if (

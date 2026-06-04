@@ -119,8 +119,26 @@ export interface DashboardResponse {
   recentServerLogs: DashboardServerLogRow[];
   lastNewsSyncAt: Date | null;
   globalContext: DashboardGlobalContext | null;
-  learningRules: Awaited<ReturnType<LearningService['findActive']>>;
+  promptImprovements: DashboardPromptImprovement[];
+  deprecatedLearningRules: DashboardDeprecatedLearningRule[];
   orchestratorNote: string;
+}
+
+export interface DashboardPromptImprovement {
+  id: string;
+  problemType: string;
+  rootCause: string;
+  promptImprovement: string;
+  confidence: number | null;
+  sourcePredictionId: string | null;
+  createdAt: Date;
+}
+
+export interface DashboardDeprecatedLearningRule {
+  id: string;
+  title: string | null;
+  description: string | null;
+  createdAt: Date;
 }
 
 export interface AnalyzePendingNewsResult {
@@ -184,7 +202,8 @@ export class OrchestratorService {
       failedAnalysisNewsCount,
       recentPredictions,
       recentNews,
-      learningRules,
+      promptImprovementRows,
+      deprecatedLearningRules,
       globalContext,
       recentServerLogs,
       lastNewsSyncAt,
@@ -199,7 +218,8 @@ export class OrchestratorService {
       this.newsService.countByAnalysisStatus(NewsAnalysisStatus.FAILED),
       this.predictionsService.findRecentForDashboard(15),
       this.newsService.findRecentForDashboard(10),
-      this.learningService.findActive(),
+      this.learningService.findActivePromptImprovements(),
+      this.learningService.findDeprecated(),
       this.getLatestGlobalContext(),
       this.serverLogsService.findLatest(80),
       this.serverLogsService.getLastCompletedAt('news_sync'),
@@ -278,9 +298,23 @@ export class OrchestratorService {
       })),
       lastNewsSyncAt,
       globalContext,
-      learningRules,
+      promptImprovements: promptImprovementRows.map((r) => ({
+        id: r.id,
+        problemType: r.problemType ?? '',
+        rootCause: r.rootCause ?? '',
+        promptImprovement: r.promptImprovement ?? '',
+        confidence: r.confidence,
+        sourcePredictionId: r.sourcePredictionId,
+        createdAt: r.createdAt,
+      })),
+      deprecatedLearningRules: deprecatedLearningRules.map((r) => ({
+        id: r.id,
+        title: r.title,
+        description: r.description,
+        createdAt: r.createdAt,
+      })),
       orchestratorNote:
-        'Live MetaAPI + news/analysis/evaluation + global context (30m) + learning on failures.',
+        'Live MetaAPI + news/analysis/evaluation + global context (30m) + prompt improvements on failures.',
     };
   }
 
@@ -327,7 +361,9 @@ export class OrchestratorService {
       newsIds: [],
     };
 
-    const learningRules = await this.learningService.findActive();
+    const promptImprovements = this.learningService.toPromptImprovementSlices(
+      await this.learningService.findActivePromptImprovements(),
+    );
 
     for (const newsItem of newsItems) {
       summary.processed++;
@@ -360,11 +396,7 @@ export class OrchestratorService {
           impactReason: impactOutput.impactReason,
           currentPrice: currentPrice.price,
           publishedAt: newsItem.publishedAt,
-          learningRules: learningRules.map((r) => ({
-            id: r.id,
-            title: r.title,
-            description: r.description,
-          })),
+          promptImprovements,
         });
 
         await this.prisma.newsItem.update({
@@ -609,7 +641,7 @@ export class OrchestratorService {
       upcomingNews,
       activePredictions,
       recentResults,
-      learningRules,
+      promptImprovementRows,
     ] = await Promise.all([
       this.prisma.newsItem.findMany({
         where: {
@@ -644,8 +676,12 @@ export class OrchestratorService {
           prediction: { include: { newsItem: true } },
         },
       }),
-      this.learningService.findActive(),
+      this.learningService.findActivePromptImprovements(),
     ]);
+
+    const promptImprovements = this.learningService.toPromptImprovementSlices(
+      promptImprovementRows,
+    );
 
     return {
       currentPrice,
@@ -684,11 +720,7 @@ export class OrchestratorService {
         predictionDirection: r.prediction.direction,
         newsTitle: r.prediction.newsItem?.title ?? null,
       })),
-      learningRules: learningRules.map((r) => ({
-        id: r.id,
-        title: r.title,
-        description: r.description,
-      })),
+      promptImprovements,
     };
   }
 

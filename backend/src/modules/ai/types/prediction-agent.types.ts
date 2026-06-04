@@ -1,10 +1,6 @@
 import { PredictionDirection } from '@prisma/client';
 
-export type PredictionAgentLearningRuleSlice = {
-  id: string;
-  title: string;
-  description: string;
-};
+import type { PromptImprovementSlice } from './prompt-improvement.types';
 
 export type PredictionAgentInput = {
   title: string;
@@ -15,7 +11,7 @@ export type PredictionAgentInput = {
   impactReason?: string | null;
   currentPrice: number;
   publishedAt: Date;
-  learningRules?: PredictionAgentLearningRuleSlice[];
+  promptImprovements?: PromptImprovementSlice[];
 };
 
 export type PredictionAgentOutput = {

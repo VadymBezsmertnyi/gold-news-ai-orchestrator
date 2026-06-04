@@ -37,7 +37,7 @@ export class LearningAgent {
         },
         currentPrice: input.currentPrice,
         recentNews: input.recentNews,
-        activeLearningRules: input.activeLearningRules,
+        activePromptImprovements: input.activePromptImprovements,
       },
       null,
       0,
@@ -47,29 +47,40 @@ export class LearningAgent {
       provider: LlmProviderType.CLAUDE,
       model: process.env.CLAUDE_MODEL_SMART || 'claude-sonnet-4-6',
       temperature: 0.15,
-      maxTokens: 700,
+      maxTokens: 900,
       system:
-        'You are an educational post-mortem analyst for failed XAUUSD predictions. You propose concise learning rules only when a clear repeatable pattern exists. Avoid overfitting.',
+        'You improve AI agent decision-making for educational XAUUSD analytics. You create reusable prompt and reasoning improvements — never temporary market facts.',
       prompt: `
-A prediction FAILED. Decide whether a new learning rule should be created.
+A SINGLE_NEWS prediction FAILED. Analyze why the agent reasoning failed and propose a reusable prompt improvement.
 
 Data:
 ${payload}
 
-Rules:
-- shouldCreateRule: true only if there is a clear, generalizable pattern.
-- Do not create a rule for every failure.
-- title and description must be short and educational.
-- confidence 1-100 reflects how strong the pattern is.
-- If similar activeLearningRules already cover this, set shouldCreateRule false.
+CRITICAL:
+- Do NOT store temporary market situations (e.g. "RBA inflation is weak for gold", "ceasefire in X should not trigger SELL").
+- Create reusable reasoning improvements valid across different market environments.
+- promptImprovement must be an instruction the model can follow in future runs (confidence adjustment, signal requirements, categorization rules).
+- problemType: short category (e.g. OVERCONFIDENCE, SINGLE_DRIVER, IMPACT_MISCLASS, TIMEFRAME_MISMATCH).
+- rootCause: why the agent failed (process/reasoning), not a market recap.
+- shouldCreateImprovement: true only if the improvement is generalizable and not already covered by activePromptImprovements.
+- confidence 1-100: strength of the improvement proposal.
+
+GOOD promptImprovement examples:
+- "Require at least two independent bullish signals before creating BUY prediction."
+- "Reduce confidence when prediction is based on a single LOW impact news item."
+- "Differentiate major central banks from regional central banks when evaluating inflation news."
+
+BAD (reject — set shouldCreateImprovement false):
+- "RBA inflation signals have weak gold impact."
+- "Lebanon ceasefire should not trigger SELL."
 
 Return JSON:
 {
-  "shouldCreateRule": false,
-  "title": "short rule title",
-  "description": "one or two sentences",
-  "confidence": 0,
-  "reason": "why or why not"
+  "shouldCreateImprovement": false,
+  "problemType": "OVERCONFIDENCE",
+  "rootCause": "short reasoning failure explanation",
+  "promptImprovement": "reusable instruction for future agent prompts",
+  "confidence": 0
 }
 `,
     });

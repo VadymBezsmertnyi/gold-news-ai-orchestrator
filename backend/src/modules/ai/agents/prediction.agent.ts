@@ -16,7 +16,9 @@ export class PredictionAgent {
   constructor(private readonly llmRouter: LlmRouterService) {}
 
   async run(input: PredictionAgentInput): Promise<PredictionAgentOutput> {
-    const learningRulesJson = JSON.stringify(input.learningRules ?? []);
+    const promptImprovementsJson = JSON.stringify(
+      input.promptImprovements ?? [],
+    );
 
     return this.llmRouter.askJson<PredictionAgentOutput>({
       provider: LlmProviderType.OPENAI,
@@ -38,7 +40,7 @@ Context:
   "impactReason": "${input.impactReason || ''}",
   "currentPrice": ${input.currentPrice},
   "publishedAt": "${input.publishedAt.toISOString()}",
-  "learningRules": ${learningRulesJson}
+  "promptImprovements": ${promptImprovementsJson}
 }
 
 Rules:
@@ -49,7 +51,7 @@ Rules:
 - confidence must be 1-100.
 - expectedMovePercent must be realistic for the timeframe.
 - timeframeMinutes should be 30, 60, 120, 240, or 1440.
-- Learning rules are historical observations, not absolute truth. Consider them cautiously; do not follow them blindly.
+- promptImprovements are reusable reasoning adjustments for how you decide — NOT current market facts. Apply them to improve decision quality; do not treat them as absolute truth.
 - This is educational analytics only.
 
 Return JSON:

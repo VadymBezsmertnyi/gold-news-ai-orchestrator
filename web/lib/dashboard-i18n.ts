@@ -16,7 +16,8 @@ export const SECTION_TITLES = {
   predictions: "Прогнози",
   recentNews: "Останні новини",
   pendingNews: "Новини в черзі на аналіз",
-  learningRules: "Правила навчання",
+  promptImprovements: "Покращення промптів",
+  deprecatedRules: "Застарілі (ринкові) правила",
   logs: "Фонові процеси / логи сервера",
 } as const;
 
