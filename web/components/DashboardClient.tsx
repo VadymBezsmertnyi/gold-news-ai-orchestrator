@@ -23,6 +23,10 @@ import {
 } from "@/lib/dashboard-goal-completion";
 import {
   computeExpectedPrice,
+  displaySignedActualMovePercent,
+  displayStartPrice,
+  formatSignedMovePercent,
+  resolveCurrentOrFinalPriceForRow,
   resolveStartPrice,
 } from "@/lib/dashboard-prediction-prices";
 import {
@@ -41,6 +45,7 @@ import {
 import {
   CHIP_LABELS,
   connectionBadgeLabel,
+  CURRENT_OR_FINAL_PRICE_TOOLTIP,
   GOAL_COMPLETION_TOOLTIP,
   GLOBAL_CONTEXT_LABELS,
   LOG_HEADERS,
@@ -80,6 +85,7 @@ const TH =
   "px-2 py-1 text-left text-[9px] font-semibold uppercase tracking-wide text-zinc-500";
 const TD = "px-2 py-1 align-top text-[10px] leading-tight";
 const TD_NUM = `${TD} tabular-nums`;
+const PRICE_TARGET_CLASS = "font-medium text-violet-900";
 
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
@@ -304,29 +310,36 @@ function EventStateCell({
 }
 
 function PredictionMetricsCells({ row }: { row: DashboardPredictionRow }) {
-  const start = resolveStartPrice(row);
+  const startForTarget = resolveStartPrice(row) ?? displayStartPrice(row);
+  const startDisplay = displayStartPrice(row);
   const expectedPrice = computeExpectedPrice(
-    start,
+    startForTarget,
     row.expectedMovePercent,
     row.direction,
   );
-  const finalPrice = row.currentLivePrice;
+  const currentOrFinalPrice = resolveCurrentOrFinalPriceForRow(row);
+  const signedActual = displaySignedActualMovePercent(row);
   const goalCompletion = computeGoalCompletionForRow(row);
   return (
     <>
       <td className={TD_NUM}>
-        {expectedPrice != null ? (
-          <span className="font-medium text-violet-900">
-            {formatPrice(expectedPrice)}
-          </span>
+        {startDisplay != null ? (
+          <span className={PRICE_TARGET_CLASS}>{formatPrice(startDisplay)}</span>
         ) : (
           <span className="text-zinc-400">—</span>
         )}
       </td>
       <td className={TD_NUM}>
-        {finalPrice != null ? (
+        {expectedPrice != null ? (
+          <span className={PRICE_TARGET_CLASS}>{formatPrice(expectedPrice)}</span>
+        ) : (
+          <span className="text-zinc-400">—</span>
+        )}
+      </td>
+      <td className={TD_NUM}>
+        {currentOrFinalPrice != null ? (
           <span className="font-medium text-emerald-800">
-            {formatPrice(finalPrice)}
+            {formatPrice(currentOrFinalPrice)}
           </span>
         ) : (
           <span className="text-zinc-400">—</span>
@@ -335,7 +348,9 @@ function PredictionMetricsCells({ row }: { row: DashboardPredictionRow }) {
       <td className={TD_NUM}>
         {formatExpectedMoveDisplay(row.direction, row.expectedMovePercent)}
       </td>
-      <td className={TD_NUM}>{formatPercent(row.actualMovePercent)}</td>
+      <td className={TD_NUM}>
+        {formatSignedMovePercent(signedActual)}
+      </td>
       <td className={TD_NUM}>
         {goalCompletion != null ? (
           <GoalCompletionBadge value={goalCompletion} />
@@ -698,16 +713,17 @@ function NewsTitleCell({ title }: { title: string }) {
 }
 
 const PREDICTION_COLUMNS = [
-  { id: "news", width: "w-[24%]" },
+  { id: "news", width: "w-[22%]" },
   { id: "impact", width: "w-[5%]" },
   { id: "direction", width: "w-[6%]" },
   { id: "confidence", width: "w-[5%]" },
   { id: "status", width: "w-[8%]" },
-  { id: "eventState", width: "w-[13%]" },
-  { id: "expectedPrice", width: "w-[8%]" },
-  { id: "finalPrice", width: "w-[8%]" },
-  { id: "expectedMove", width: "w-[7%]" },
-  { id: "actualMove", width: "w-[7%]" },
+  { id: "eventState", width: "w-[12%]" },
+  { id: "startPrice", width: "w-[7%]" },
+  { id: "expectedPrice", width: "w-[7%]" },
+  { id: "finalPrice", width: "w-[7%]" },
+  { id: "expectedMove", width: "w-[6%]" },
+  { id: "actualMove", width: "w-[6%]" },
   { id: "goalCompletion", width: "w-[9%]" },
 ] as const;
 
@@ -733,8 +749,11 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
             <th className={TH}>{PREDICTION_HEADERS.confidence}</th>
             <th className={TH}>{PREDICTION_HEADERS.status}</th>
             <th className={TH}>{PREDICTION_HEADERS.eventState}</th>
+            <th className={TH}>{PREDICTION_HEADERS.startPrice}</th>
             <th className={TH}>{PREDICTION_HEADERS.expectedPrice}</th>
-            <th className={TH}>{PREDICTION_HEADERS.finalPrice}</th>
+            <th className={TH} title={CURRENT_OR_FINAL_PRICE_TOOLTIP}>
+              {PREDICTION_HEADERS.finalPrice}
+            </th>
             <th className={TH}>{PREDICTION_HEADERS.expectedMove}</th>
             <th className={TH}>{PREDICTION_HEADERS.actualMove}</th>
             <th className={TH} title={GOAL_COMPLETION_TOOLTIP}>

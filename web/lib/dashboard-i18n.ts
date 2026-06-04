@@ -53,8 +53,9 @@ export const PREDICTION_HEADERS = {
   confidence: "Впевн.",
   status: "Статус",
   eventState: "Стан події",
+  startPrice: "Стартова ціна",
   expectedPrice: "Ціль",
-  finalPrice: "Зараз",
+  finalPrice: "Поточна / фінальна",
   expectedMove: "Очік.%",
   actualMove: "Факт%",
   goalCompletion: "Виконання цілі",
@@ -63,6 +64,9 @@ export const PREDICTION_HEADERS = {
 
 export const GOAL_COMPLETION_TOOLTIP =
   "Показує, який відсоток очікуваного руху вже досягнуто ринком.";
+
+export const CURRENT_OR_FINAL_PRICE_TOOLTIP =
+  "Для активних і майбутніх прогнозів — поточна ринкова ціна. Для завершених — ціна на момент оцінки.";
 
 export function translateDirectionGuessBadge(value: boolean | null): {
   label: string;

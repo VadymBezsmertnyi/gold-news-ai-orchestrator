@@ -2,7 +2,11 @@ import {
   getEventLifecyclePhase,
   type EventLifecyclePhase,
 } from "./dashboard-event-state";
-import { resolveStartPrice } from "./dashboard-prediction-prices";
+import {
+  computeSignedActualMovePercent,
+  displayStartPrice,
+  resolveCurrentOrFinalPriceForRow,
+} from "./dashboard-prediction-prices";
 import type { DashboardPredictionRow } from "./types";
 
 export type GoalCompletionTone =
@@ -37,25 +41,16 @@ export function formatExpectedMoveDisplay(
   return `${prefix}${signed.toFixed(2)}%`;
 }
 
-function signedMoveFromPrices(row: {
-  missingEventStartPrice: boolean;
-  priceAtEventStart: number | null;
-  priceAtPrediction: number | null;
-  currentLivePrice: number | null;
-}): number | null {
-  const start = resolveStartPrice(row);
-  const price = row.currentLivePrice;
-  if (start == null || price == null || start === 0) return null;
-  return ((price - start) / start) * 100;
-}
-
 function resolveSignedActualMovePercent(
   row: DashboardPredictionRow,
   phase: EventLifecyclePhase,
+  now = new Date(),
 ): number | null {
   if (phase === "upcoming") return null;
 
-  return signedMoveFromPrices(row);
+  const start = displayStartPrice(row);
+  const price = resolveCurrentOrFinalPriceForRow(row);
+  return computeSignedActualMovePercent(start, price);
 }
 
 export function computeGoalCompletionPercent(
@@ -107,7 +102,7 @@ export function computeGoalCompletionForRow(
 
   if (phase === "upcoming" || row.missingEventStartPrice) return null;
 
-  const signedActual = resolveSignedActualMovePercent(row, phase);
+  const signedActual = resolveSignedActualMovePercent(row, phase, now);
   if (signedActual == null) return null;
 
   return computeGoalCompletionPercent(
