@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 
 // modules
 import { MarketModule } from '../market/market.module';
@@ -9,7 +9,7 @@ import { PredictionsController } from './predictions.controller';
 import { PredictionsService } from './predictions.service';
 
 @Module({
-  imports: [NewsModule, MarketModule],
+  imports: [NewsModule, forwardRef(() => MarketModule)],
   controllers: [PredictionsController],
   providers: [PredictionsService],
   exports: [PredictionsService],

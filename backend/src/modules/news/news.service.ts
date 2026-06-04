@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { NewsItem, Prisma } from '@prisma/client';
+import { NewsAnalysisStatus, type NewsItem, type Prisma } from '@prisma/client';
 
 // common
 import { PrismaService } from '../../common/prisma/prisma.service';
@@ -27,6 +27,11 @@ export class NewsService {
     const item = await this.prisma.newsItem.findUnique({ where: { id } });
     if (!item) throw new NotFoundException(`News item ${id} not found`);
     return item;
+  }
+
+  /** Used by scheduler and POST /news/sync */
+  async syncNews(): Promise<SyncNewsResult> {
+    return this.syncFromForexFactory();
   }
 
   async syncFromForexFactory(): Promise<SyncNewsResult> {
@@ -65,6 +70,7 @@ export class NewsService {
         summary:
           'Educational mock headline for dashboard and prediction pipeline testing.',
         publishedAt: now,
+        analysisStatus: NewsAnalysisStatus.PENDING,
         rawPayload: { mock: true, instrument: 'XAUUSD' },
       },
     });
@@ -72,6 +78,37 @@ export class NewsService {
 
   async count(): Promise<number> {
     return this.prisma.newsItem.count();
+  }
+
+  async countByAnalysisStatus(status: NewsAnalysisStatus): Promise<number> {
+    return this.prisma.newsItem.count({ where: { analysisStatus: status } });
+  }
+
+  async findPendingAnalysis(limit = 5): Promise<NewsItem[]> {
+    return this.prisma.newsItem.findMany({
+      where: { analysisStatus: NewsAnalysisStatus.PENDING },
+      orderBy: { publishedAt: 'desc' },
+      take: limit,
+    });
+  }
+
+  async findRecentForDashboard(limit = 10) {
+    return this.prisma.newsItem.findMany({
+      orderBy: { publishedAt: 'desc' },
+      take: limit,
+      select: {
+        id: true,
+        title: true,
+        source: true,
+        publishedAt: true,
+        analysisStatus: true,
+        category: true,
+        impactLevel: true,
+        goldImpact: true,
+        analysisSummary: true,
+        analyzedAt: true,
+      },
+    });
   }
 
   private mapForexFactoryEvent(
@@ -93,6 +130,7 @@ export class NewsService {
       url: event.details_url,
       summary: summaryParts.length > 0 ? summaryParts.join(' | ') : undefined,
       publishedAt,
+      analysisStatus: NewsAnalysisStatus.PENDING,
       rawPayload: event as unknown as Prisma.InputJsonValue,
     };
   }

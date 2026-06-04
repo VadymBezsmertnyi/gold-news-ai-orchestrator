@@ -19,7 +19,7 @@ export class NewsController {
 
   @Post('sync')
   sync() {
-    return this.newsService.syncFromForexFactory();
+    return this.newsService.syncNews();
   }
 
   @Post('mock')

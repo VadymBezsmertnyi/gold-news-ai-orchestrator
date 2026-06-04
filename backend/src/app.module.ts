@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 
 // common
 import { AppConfigModule } from './common/config/config.module';
@@ -11,9 +12,11 @@ import { MarketModule } from './modules/market/market.module';
 import { NewsModule } from './modules/news/news.module';
 import { OrchestratorModule } from './modules/orchestrator/orchestrator.module';
 import { PredictionsModule } from './modules/predictions/predictions.module';
+import { SchedulerModule } from './modules/scheduler/scheduler.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     AppConfigModule,
     PrismaModule,
     NewsModule,
@@ -22,6 +25,7 @@ import { PredictionsModule } from './modules/predictions/predictions.module';
     AgentsModule,
     LearningModule,
     OrchestratorModule,
+    SchedulerModule,
   ],
 })
 export class AppModule {}

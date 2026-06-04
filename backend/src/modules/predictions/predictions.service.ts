@@ -85,31 +85,37 @@ export class PredictionsService {
    * A future BullMQ worker can call evaluatePrediction() per id on a schedule.
    */
   async evaluateDuePredictions(): Promise<EvaluateDueSummary> {
+    const now = new Date();
     const due = await this.prisma.prediction.findMany({
       where: {
-        status: PredictionStatus.PENDING,
-        checkAfter: { lte: new Date() },
-        result: { is: null },
+        ...this.activePredictionWhere(now),
+        checkAfter: { lte: now },
       },
       orderBy: { checkAfter: 'asc' },
     });
 
-    const summary: EvaluateDueSummary = {
-      evaluated: 0,
-      success: 0,
-      failed: 0,
-    };
+    return this.evaluatePredictionBatch(due, (id) =>
+      this.evaluatePrediction(id),
+    );
+  }
 
-    for (const prediction of due) {
-      const outcome = await this.evaluatePrediction(prediction.id);
-      if (outcome.alreadyEvaluated || !outcome.result) continue;
+  /**
+   * Called on each market price update. Evaluates active predictions once checkAfter is reached.
+   * Early invalidation on price movement can be added when agent rules are defined.
+   */
+  async evaluateActivePredictionsByPrice(
+    priceAfter: number,
+  ): Promise<EvaluateDueSummary> {
+    const now = new Date();
+    const active = await this.prisma.prediction.findMany({
+      where: this.activePredictionWhere(now),
+      orderBy: { checkAfter: 'asc' },
+    });
 
-      summary.evaluated++;
-      if (outcome.result.isSuccess) summary.success++;
-      else summary.failed++;
-    }
-
-    return summary;
+    const dueNow = active.filter((p) => now >= p.checkAfter);
+    return this.evaluatePredictionBatch(dueNow, (id) =>
+      this.evaluatePrediction(id, priceAfter),
+    );
   }
 
   async evaluatePrediction(
@@ -193,6 +199,46 @@ export class PredictionsService {
       take: limit,
       include: { newsItem: true, result: true },
     });
+  }
+
+  private activePredictionWhere(now: Date): {
+    status: PredictionStatus;
+    result: { is: null };
+    AND: Array<
+      | { OR: Array<{ validFrom: null } | { validFrom: { lte: Date } }> }
+      | { OR: Array<{ expiresAt: null } | { expiresAt: { gte: Date } }> }
+    >;
+  } {
+    return {
+      status: PredictionStatus.PENDING,
+      result: { is: null },
+      AND: [
+        { OR: [{ validFrom: null }, { validFrom: { lte: now } }] },
+        { OR: [{ expiresAt: null }, { expiresAt: { gte: now } }] },
+      ],
+    };
+  }
+
+  private async evaluatePredictionBatch(
+    predictions: Array<{ id: string }>,
+    evaluate: (id: string) => Promise<EvaluatePredictionOutcome>,
+  ): Promise<EvaluateDueSummary> {
+    const summary: EvaluateDueSummary = {
+      evaluated: 0,
+      success: 0,
+      failed: 0,
+    };
+
+    for (const prediction of predictions) {
+      const outcome = await evaluate(prediction.id);
+      if (outcome.alreadyEvaluated || !outcome.result) continue;
+
+      summary.evaluated++;
+      if (outcome.result.isSuccess) summary.success++;
+      else summary.failed++;
+    }
+
+    return summary;
   }
 
   private isPredictionSuccessful(

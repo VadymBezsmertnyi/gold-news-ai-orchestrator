@@ -14,5 +14,6 @@ import { OrchestratorService } from './orchestrator.service';
   imports: [NewsModule, PredictionsModule, LearningModule, AgentsModule],
   controllers: [OrchestratorController],
   providers: [OrchestratorService],
+  exports: [OrchestratorService],
 })
 export class OrchestratorModule {}
