@@ -57,9 +57,12 @@ export const PREDICTION_HEADERS = {
   finalPrice: "Зараз",
   expectedMove: "Очік.%",
   actualMove: "Факт%",
-  distanceToTarget: "Δцілі%",
+  goalCompletion: "Виконання цілі",
   liveEvaluation: "Live",
 } as const;
+
+export const GOAL_COMPLETION_TOOLTIP =
+  "Показує, який відсоток очікуваного руху вже досягнуто ринком.";
 
 export function translateDirectionGuessBadge(value: boolean | null): {
   label: string;

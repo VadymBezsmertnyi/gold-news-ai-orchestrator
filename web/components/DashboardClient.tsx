@@ -16,8 +16,13 @@ import {
   formatEventWindowDuration,
 } from "@/lib/dashboard-event-state";
 import {
+  computeGoalCompletionForRow,
+  formatExpectedMoveDisplay,
+  goalCompletionTone,
+  type GoalCompletionTone,
+} from "@/lib/dashboard-goal-completion";
+import {
   computeExpectedPrice,
-  distanceToTargetPercent,
   resolveStartPrice,
 } from "@/lib/dashboard-prediction-prices";
 import {
@@ -36,6 +41,7 @@ import {
 import {
   CHIP_LABELS,
   connectionBadgeLabel,
+  GOAL_COMPLETION_TOOLTIP,
   GLOBAL_CONTEXT_LABELS,
   LOG_HEADERS,
   NEWS_DETAIL_LABELS,
@@ -229,6 +235,25 @@ function PredictionStatusIndicator({
   );
 }
 
+const GOAL_COMPLETION_STYLES: Record<GoalCompletionTone, string> = {
+  red: "bg-red-100 text-red-800 border-red-200",
+  orange: "bg-orange-100 text-orange-900 border-orange-200",
+  yellow: "bg-amber-100 text-amber-900 border-amber-200",
+  green: "bg-emerald-100 text-emerald-800 border-emerald-300",
+  darkGreen: "bg-emerald-700 text-white border-emerald-800",
+};
+
+function GoalCompletionBadge({ value }: { value: number }) {
+  const tone = goalCompletionTone(value);
+  return (
+    <span
+      className={`inline-block rounded border px-1 py-px text-[10px] font-semibold tabular-nums ${GOAL_COMPLETION_STYLES[tone]}`}
+    >
+      {Math.round(value)}%
+    </span>
+  );
+}
+
 function ScorePercentCell({ value }: { value: number | null }) {
   if (value == null) return <span className="text-zinc-400">—</span>;
   const tone = scorePercentTone(value);
@@ -286,12 +311,7 @@ function PredictionMetricsCells({ row }: { row: DashboardPredictionRow }) {
     row.direction,
   );
   const finalPrice = row.currentLivePrice;
-  const distance = distanceToTargetPercent(
-    start,
-    expectedPrice,
-    finalPrice,
-    row.direction,
-  );
+  const goalCompletion = computeGoalCompletionForRow(row);
   return (
     <>
       <td className={TD_NUM}>
@@ -313,20 +333,12 @@ function PredictionMetricsCells({ row }: { row: DashboardPredictionRow }) {
         )}
       </td>
       <td className={TD_NUM}>
-        {formatPercent(row.expectedMovePercent)}
+        {formatExpectedMoveDisplay(row.direction, row.expectedMovePercent)}
       </td>
       <td className={TD_NUM}>{formatPercent(row.actualMovePercent)}</td>
       <td className={TD_NUM}>
-        {distance != null ? (
-          <span
-            className={
-              row.sourceType === "GLOBAL_CONTEXT"
-                ? "font-medium text-violet-800"
-                : "text-zinc-700"
-            }
-          >
-            {distance.toFixed(2)}%
-          </span>
+        {goalCompletion != null ? (
+          <GoalCompletionBadge value={goalCompletion} />
         ) : (
           <span className="text-zinc-400">—</span>
         )}
@@ -696,7 +708,7 @@ const PREDICTION_COLUMNS = [
   { id: "finalPrice", width: "w-[8%]" },
   { id: "expectedMove", width: "w-[7%]" },
   { id: "actualMove", width: "w-[7%]" },
-  { id: "distanceToTarget", width: "w-[9%]" },
+  { id: "goalCompletion", width: "w-[9%]" },
 ] as const;
 
 const PREDICTION_COL_COUNT = PREDICTION_COLUMNS.length;
@@ -725,7 +737,9 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
             <th className={TH}>{PREDICTION_HEADERS.finalPrice}</th>
             <th className={TH}>{PREDICTION_HEADERS.expectedMove}</th>
             <th className={TH}>{PREDICTION_HEADERS.actualMove}</th>
-            <th className={TH}>{PREDICTION_HEADERS.distanceToTarget}</th>
+            <th className={TH} title={GOAL_COMPLETION_TOOLTIP}>
+              {PREDICTION_HEADERS.goalCompletion}
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100">
