@@ -95,8 +95,8 @@ model Prediction {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
-  newsItem      NewsItem                 @relation(fields: [newsItemId], references: [id], onDelete: Cascade)
-  globalContext MarketContextAnalysis?   @relation(fields: [globalContextId], references: [id], onDelete: SetNull)
+  newsItem      NewsItem               @relation(fields: [newsItemId], references: [id], onDelete: Cascade)
+  globalContext MarketContextAnalysis? @relation(fields: [globalContextId], references: [id], onDelete: SetNull)
   result        PredictionResult?
 
   @@index([status])
