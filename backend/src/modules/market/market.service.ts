@@ -22,7 +22,13 @@ const SNAPSHOT_WINDOW_MS = 10 * 60 * 1000;
 
 export interface NearestSnapshotResult {
   price: number;
-  source: BaselineSource;
+  source: BaselineSource | 'fallback_current';
+}
+
+export interface EventBaselineSnapshotResult {
+  price: number;
+  source: 'snapshot_before' | 'snapshot_after';
+  capturedAt: Date;
 }
 
 export interface PriceUpdateResult {
@@ -34,6 +40,7 @@ export interface PriceUpdateResult {
 export class MarketService {
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => MetaApiLivePriceService))
     private readonly metaApiLive: MetaApiLivePriceService,
     @Inject(forwardRef(() => PredictionsService))
     private readonly predictionsService: PredictionsService,
@@ -111,6 +118,47 @@ export class MarketService {
 
     const live = await this.getCurrentXauusd();
     return { price: live.price, source: 'fallback_current' };
+  }
+
+  /** Snapshot-only lookup for event-start baseline (no live-price fallback). */
+  async findNearestSnapshotForEventBaseline(
+    symbol: string,
+    targetTime: Date,
+  ): Promise<EventBaselineSnapshotResult | null> {
+    const windowStart = new Date(targetTime.getTime() - SNAPSHOT_WINDOW_MS);
+    const windowEnd = new Date(targetTime.getTime() + SNAPSHOT_WINDOW_MS);
+
+    const before = await this.prisma.marketPriceSnapshot.findFirst({
+      where: {
+        symbol,
+        capturedAt: { gte: windowStart, lte: targetTime },
+      },
+      orderBy: { capturedAt: 'desc' },
+    });
+    if (before) {
+      return {
+        price: before.price,
+        source: 'snapshot_before',
+        capturedAt: before.capturedAt,
+      };
+    }
+
+    const after = await this.prisma.marketPriceSnapshot.findFirst({
+      where: {
+        symbol,
+        capturedAt: { gt: targetTime, lte: windowEnd },
+      },
+      orderBy: { capturedAt: 'asc' },
+    });
+    if (after) {
+      return {
+        price: after.price,
+        source: 'snapshot_after',
+        capturedAt: after.capturedAt,
+      };
+    }
+
+    return null;
   }
 
   async handlePriceUpdate(

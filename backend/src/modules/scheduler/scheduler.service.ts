@@ -8,6 +8,7 @@ import { ANALYSIS_BATCH_LIMIT } from '../../constants';
 // modules
 import { NewsService } from '../news/news.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
+import { EventStartPriceService } from '../predictions/event-start-price.service';
 import { PredictionsService } from '../predictions/predictions.service';
 import { SERVER_LOG_TYPES } from '../server-logs/server-logs.constants';
 import { ServerLogsService } from '../server-logs/server-logs.service';
@@ -21,6 +22,7 @@ export class SchedulerService implements OnModuleInit {
     private readonly newsService: NewsService,
     private readonly orchestratorService: OrchestratorService,
     private readonly predictionsService: PredictionsService,
+    private readonly eventStartPriceService: EventStartPriceService,
     private readonly serverLogs: ServerLogsService,
   ) {}
 
@@ -127,6 +129,23 @@ export class SchedulerService implements OnModuleInit {
         `Scheduled global context failed: ${message}`,
       );
       this.logger.error('Scheduled global context failed', error);
+    }
+  }
+
+  @Cron('*/30 * * * * *')
+  async handleEventStartPriceCapture(): Promise<void> {
+    try {
+      const summary =
+        await this.eventStartPriceService.captureEventStartPrices();
+      if (summary.processed > 0) {
+        this.logger.log(
+          `Event start price capture: processed=${summary.processed} live=${summary.nearLiveCaptured} history=${summary.historicalCaptured} snapshot=${summary.snapshotCaptured} missing=${summary.missing}`,
+        );
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown capture error';
+      this.logger.error(`Event start price capture failed: ${message}`, error);
     }
   }
 

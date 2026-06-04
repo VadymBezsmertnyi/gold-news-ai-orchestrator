@@ -28,6 +28,9 @@ export const PREDICTION_HEADERS = {
   confidence: "Впевненість",
   pricePrediction: "Ціна прогнозу",
   priceEventStart: "Ціна старту новини",
+  baselineSource: "Джерело стартової ціни",
+  baselineTime: "Час стартової ціни",
+  baselineTimeDiff: "Різниця часу (с)",
   current: "Поточна/фінальна",
   actualMove: "Факт Δ %",
   expectedMove: "Очікуваний рух %",
@@ -151,4 +154,19 @@ export function predictionSourceLabel(sourceType: string): string {
   if (sourceType === "GLOBAL_CONTEXT") return "Глобальний";
   if (sourceType === "SINGLE_NEWS") return "Новина";
   return sourceType;
+}
+
+const BASELINE_SOURCE_UA: Record<string, string> = {
+  live_at_event_start: "live на старті",
+  metaapi_history: "MetaAPI history",
+  snapshot_before: "локальний snapshot",
+  snapshot_after: "локальний snapshot",
+  priceAtEventStart: "збережена стартова",
+  priceAtPrediction: "ціна прогнозу",
+  missing: "немає",
+};
+
+export function translateBaselineSource(source: string | null): string {
+  if (!source) return "—";
+  return BASELINE_SOURCE_UA[source] ?? source;
 }

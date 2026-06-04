@@ -40,6 +40,10 @@ export interface DashboardPredictionRow {
   eventEndAt: string | null;
   priceAtPrediction: number | null;
   priceAtEventStart: number | null;
+  baselineSource: string | null;
+  baselinePriceTime: string | null;
+  baselineTimeDiffSeconds: number | null;
+  missingEventStartPrice: boolean;
   currentLivePrice: number | null;
   actualMovePercent: number | null;
   moveAccuracyPercent: number | null;

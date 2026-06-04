@@ -45,6 +45,10 @@ export interface DashboardPredictionRow {
   eventEndAt: Date | null;
   priceAtPrediction: number | null;
   priceAtEventStart: number | null;
+  baselineSource: string | null;
+  baselinePriceTime: Date | null;
+  baselineTimeDiffSeconds: number | null;
+  missingEventStartPrice: boolean;
   currentLivePrice: number | null;
   actualMovePercent: number | null;
   moveAccuracyPercent: number | null;
@@ -271,6 +275,11 @@ export class OrchestratorService {
           eventEndAt: p.eventEndAt ?? p.checkAfter,
           priceAtPrediction: p.priceAtPrediction,
           priceAtEventStart: metrics?.baseline ?? p.priceAtEventStart ?? null,
+          baselineSource:
+            metrics?.baselineSource ?? p.result?.baselineSource ?? null,
+          baselinePriceTime: metrics?.baselinePriceTime ?? null,
+          baselineTimeDiffSeconds: metrics?.baselineTimeDiffSeconds ?? null,
+          missingEventStartPrice: metrics?.missingEventStartPrice ?? false,
           currentLivePrice: metrics?.priceAfter ?? livePrice,
           actualMovePercent: metrics?.actualMovePercent ?? null,
           moveAccuracyPercent: metrics?.moveAccuracyPercent ?? null,

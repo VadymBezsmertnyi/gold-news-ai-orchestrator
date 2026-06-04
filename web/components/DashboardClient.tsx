@@ -24,6 +24,7 @@ import {
   sourceBadgeLabel,
   STATS_LABELS,
   translateAnalysisStatus,
+  translateBaselineSource,
   translateLogMessage,
   translateDirectionCorrect,
   translateExpectedResult,
@@ -271,6 +272,11 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
             <th className="px-2 py-1.5">
               {PREDICTION_HEADERS.priceEventStart}
             </th>
+            <th className="px-2 py-1.5">{PREDICTION_HEADERS.baselineSource}</th>
+            <th className="px-2 py-1.5">{PREDICTION_HEADERS.baselineTime}</th>
+            <th className="px-2 py-1.5">
+              {PREDICTION_HEADERS.baselineTimeDiff}
+            </th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.current}</th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.actualMove}</th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.expectedMove}</th>
@@ -300,7 +306,26 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                 {formatPrice(row.priceAtPrediction)}
               </td>
               <td className="px-2 py-1.5 tabular-nums font-medium text-violet-900">
-                {formatPrice(row.priceAtEventStart)}
+                {row.missingEventStartPrice ? (
+                  <StatusBadge label="Немає ціни старту" tone="pending" />
+                ) : (
+                  formatPrice(row.priceAtEventStart)
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-zinc-600">
+                {row.missingEventStartPrice
+                  ? translateBaselineSource("missing")
+                  : translateBaselineSource(row.baselineSource)}
+              </td>
+              <td className="whitespace-nowrap px-2 py-1.5 text-zinc-600">
+                {row.baselinePriceTime
+                  ? formatDateTimeUk(row.baselinePriceTime)
+                  : "—"}
+              </td>
+              <td className="px-2 py-1.5 tabular-nums text-zinc-600">
+                {row.baselineTimeDiffSeconds != null
+                  ? row.baselineTimeDiffSeconds
+                  : "—"}
               </td>
               <td className="px-2 py-1.5 tabular-nums font-medium text-emerald-800">
                 {formatPrice(row.currentLivePrice)}
@@ -336,7 +361,9 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                 />
               </td>
               <td className="px-2 py-1.5">
-                {row.isPreview && row.previewOutcome ? (
+                {row.missingEventStartPrice ? (
+                  <span className="text-zinc-400">—</span>
+                ) : row.isPreview && row.previewOutcome ? (
                   <StatusBadge
                     label={`${translateExpectedResult(row.previewOutcome)} *`}
                     tone={row.previewOutcome === "SUCCESS" ? "ok" : "fail"}

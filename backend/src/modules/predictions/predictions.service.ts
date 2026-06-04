@@ -20,9 +20,14 @@ import { XAUUSD_SYMBOL } from '../../constants';
 // modules
 import { MarketService } from '../market/market.service';
 import { NewsService } from '../news/news.service';
+import { MISSING_EVENT_START_PRICE } from '../../constants/event-start-price.constants';
+import { EVENT_START_LOG_TYPES } from '../server-logs/server-logs.constants';
+import { ServerLogsService } from '../server-logs/server-logs.service';
+import { EventStartPriceService } from './event-start-price.service';
 import {
   buildEvaluationExplanation,
   computePredictionScore,
+  mapEventStartSourceToBaseline,
   resolveEventStartAt,
   type BaselineSource,
 } from './prediction-evaluation.util';
@@ -57,6 +62,13 @@ export interface EvaluatePredictionOutcome {
   alreadyEvaluated: boolean;
 }
 
+export class SkipEvaluationError extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = 'SkipEvaluationError';
+  }
+}
+
 @Injectable()
 export class PredictionsService {
   private readonly logger = new Logger(PredictionsService.name);
@@ -65,6 +77,8 @@ export class PredictionsService {
     private readonly prisma: PrismaService,
     private readonly newsService: NewsService,
     private readonly marketService: MarketService,
+    private readonly eventStartPriceService: EventStartPriceService,
+    private readonly serverLogs: ServerLogsService,
     @Optional()
     @Inject(PREDICTION_EVALUATION_HANDLER)
     private readonly evaluationHandler: PredictionEvaluationHandler | null,
@@ -145,6 +159,7 @@ export class PredictionsService {
     const due = await this.prisma.prediction.findMany({
       where: this.duePredictionWhere(now),
       orderBy: { checkAfter: 'asc' },
+      include: { newsItem: true },
     });
 
     const summary: EvaluateDueSummary = {
@@ -182,6 +197,13 @@ export class PredictionsService {
         if (outcome.result.isSuccess) summary.success++;
         else summary.failed++;
       } catch (error) {
+        if (error instanceof SkipEvaluationError) {
+          summary.skipped.push({
+            id: prediction.id,
+            reason: error.reason,
+          });
+          continue;
+        }
         const message =
           error instanceof Error ? error.message : 'Unknown evaluation error';
         summary.errors.push({ id: prediction.id, error: message });
@@ -226,8 +248,20 @@ export class PredictionsService {
         alreadyEvaluated: true,
       };
 
-    const { baseline, baselineSource, priceAtEventStart } =
-      await this.resolveEvaluationBaseline(prediction);
+    const baselineOutcome = await this.resolveEvaluationBaseline(prediction);
+    if (!baselineOutcome.ok) {
+      await this.serverLogs.warn(
+        EVENT_START_LOG_TYPES.MISSING,
+        'Evaluation skipped — missing event start price',
+        {
+          predictionId: prediction.id,
+          eventStartAt: resolveEventStartAt(prediction).toISOString(),
+          reason: baselineOutcome.reason,
+        },
+      );
+      throw new SkipEvaluationError(baselineOutcome.reason);
+    }
+    const { baseline, baselineSource, priceAtEventStart } = baselineOutcome;
 
     const resolvedPriceAfter =
       priceAfter ?? (await this.marketService.getCurrentXauusd()).price;
@@ -344,12 +378,42 @@ export class PredictionsService {
     >[number],
     livePrice: number | null,
   ) {
+    const needsEventBaseline =
+      prediction.sourceType === PredictionSourceType.SINGLE_NEWS &&
+      (prediction.eventStartAt != null ||
+        prediction.newsItem?.eventStartAt != null);
+
+    const missingEventStartPrice =
+      needsEventBaseline &&
+      prediction.priceAtEventStart == null &&
+      prediction.result?.priceBefore == null;
+
+    if (missingEventStartPrice) {
+      return {
+        baseline: null,
+        priceAfter: prediction.result?.priceAfter ?? null,
+        signedDeltaPercent: null,
+        actualMovePercent: null,
+        moveAccuracyPercent: null,
+        finalScore: null,
+        directionCorrect: null,
+        isPreview: false,
+        previewOutcome: null,
+        baselineSource: null,
+        missingEventStartPrice: true,
+        baselinePriceTime: null,
+        baselineTimeDiffSeconds: null,
+      };
+    }
+
     const baseline =
       prediction.priceAtEventStart ??
       prediction.result?.priceBefore ??
-      prediction.priceAtPrediction;
+      (needsEventBaseline ? null : prediction.priceAtPrediction);
     const priceAfter =
-      prediction.result?.priceAfter ?? prediction.priceAtEventEnd ?? livePrice;
+      prediction.result?.priceAfter ??
+      prediction.priceAtEventEnd ??
+      (missingEventStartPrice ? null : livePrice);
     if (baseline == null || priceAfter == null) return null;
 
     const score = computePredictionScore(
@@ -369,59 +433,73 @@ export class PredictionsService {
       moveAccuracyPercent: score.moveAccuracyPercent,
       finalScore: score.finalScore,
       directionCorrect: score.directionCorrect,
-      isPreview: isPending,
-      previewOutcome: isPending
-        ? score.isSuccess
-          ? 'SUCCESS'
-          : 'FAILED'
-        : null,
+      isPreview: isPending && !needsEventBaseline,
+      previewOutcome:
+        isPending && !needsEventBaseline
+          ? score.isSuccess
+            ? 'SUCCESS'
+            : 'FAILED'
+          : null,
       baselineSource: prediction.result?.baselineSource ?? null,
+      missingEventStartPrice: false,
+      baselinePriceTime: resolveEventStartAt(prediction),
+      baselineTimeDiffSeconds: null,
     };
   }
 
   private async resolveEvaluationBaseline(
     prediction: Awaited<ReturnType<PredictionsService['findById']>>,
-  ): Promise<{
-    baseline: number;
-    baselineSource: BaselineSource;
-    priceAtEventStart: number;
-  }> {
-    if (prediction.priceAtEventStart != null)
-      return {
-        baseline: prediction.priceAtEventStart,
-        baselineSource: 'priceAtEventStart',
-        priceAtEventStart: prediction.priceAtEventStart,
-      };
+  ): Promise<
+    | {
+        ok: true;
+        baseline: number;
+        baselineSource: BaselineSource;
+        priceAtEventStart: number;
+      }
+    | { ok: false; reason: string }
+  > {
+    const needsEventBaseline =
+      prediction.sourceType === PredictionSourceType.SINGLE_NEWS &&
+      (prediction.eventStartAt != null ||
+        prediction.newsItem?.eventStartAt != null);
 
-    const eventStartAt = resolveEventStartAt(prediction);
-    const snap = await this.marketService.findNearestSnapshot(
-      XAUUSD_SYMBOL,
-      eventStartAt,
-      prediction.priceAtPrediction,
-    );
-
-    if (
-      snap.source === 'snapshot_before' ||
-      snap.source === 'snapshot_after' ||
-      snap.source === 'fallback_current'
-    )
+    if (!needsEventBaseline) {
+      if (prediction.priceAtPrediction == null)
+        return { ok: false, reason: MISSING_EVENT_START_PRICE };
       return {
-        baseline: snap.price,
-        baselineSource: snap.source,
-        priceAtEventStart: snap.price,
-      };
-
-    if (prediction.priceAtPrediction != null)
-      return {
+        ok: true,
         baseline: prediction.priceAtPrediction,
         baselineSource: 'priceAtPrediction',
         priceAtEventStart: prediction.priceAtPrediction,
       };
+    }
+
+    const resolved =
+      await this.eventStartPriceService.resolvePredictionEventStartPrice(
+        prediction,
+      );
+
+    if (resolved.price == null)
+      return {
+        ok: false,
+        reason: resolved.reason ?? MISSING_EVENT_START_PRICE,
+      };
+
+    if (prediction.priceAtEventStart == null) {
+      await this.prisma.prediction.update({
+        where: { id: prediction.id },
+        data: {
+          priceAtEventStart: resolved.price,
+          invalidationReason: null,
+        },
+      });
+    }
 
     return {
-      baseline: snap.price,
-      baselineSource: snap.source,
-      priceAtEventStart: snap.price,
+      ok: true,
+      baseline: resolved.price,
+      baselineSource: mapEventStartSourceToBaseline(resolved.source),
+      priceAtEventStart: resolved.price,
     };
   }
 
@@ -522,6 +600,13 @@ export class PredictionsService {
         if (outcome.result.isSuccess) summary.success++;
         else summary.failed++;
       } catch (error) {
+        if (error instanceof SkipEvaluationError) {
+          summary.skipped.push({
+            id: prediction.id,
+            reason: error.reason,
+          });
+          continue;
+        }
         const message =
           error instanceof Error ? error.message : 'Unknown evaluation error';
         summary.errors.push({ id: prediction.id, error: message });

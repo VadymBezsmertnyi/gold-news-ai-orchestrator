@@ -2,10 +2,20 @@ import { PredictionDirection } from '@prisma/client';
 
 export type BaselineSource =
   | 'priceAtEventStart'
+  | 'live_at_event_start'
+  | 'metaapi_history'
   | 'snapshot_before'
   | 'snapshot_after'
-  | 'fallback_current'
   | 'priceAtPrediction';
+
+export function mapEventStartSourceToBaseline(source: string): BaselineSource {
+  if (source === 'priceAtEventStart') return 'priceAtEventStart';
+  if (source === 'live_at_event_start') return 'live_at_event_start';
+  if (source === 'metaapi_history') return 'metaapi_history';
+  if (source === 'snapshot_before') return 'snapshot_before';
+  if (source === 'snapshot_after') return 'snapshot_after';
+  return 'priceAtPrediction';
+}
 
 export interface PredictionScoreResult {
   actualMovePercent: number;

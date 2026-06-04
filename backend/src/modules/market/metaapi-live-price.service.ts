@@ -95,6 +95,37 @@ export class MetaApiLivePriceService implements OnModuleInit, OnModuleDestroy {
     return this.stateStore.getState().latestPrice;
   }
 
+  /** Account handle for historical candles (RPC, not streaming). */
+  async getMetatraderAccountForHistory(): Promise<MetatraderAccount | null> {
+    const token = this.config.get('METAAPI_TOKEN', { infer: true });
+    const accountId = this.config.get('METAAPI_ACCOUNT_ID', { infer: true });
+    if (!token?.trim() || !accountId?.trim()) return null;
+
+    const state = this.stateStore.getState();
+    if (state.currentAccount?.connectionStatus === 'CONNECTED')
+      return state.currentAccount;
+
+    try {
+      const api =
+        state.api ??
+        new MetaApi(token, {
+          application: 'gold-news-ai-orchestrator',
+          useSharedClientApi: true,
+          keepHashTrees: false,
+        });
+      const account = await api.metatraderAccountApi.getAccount(accountId);
+      if (account.state !== 'DEPLOYED') await account.deploy();
+      if (account.connectionStatus !== 'CONNECTED')
+        await account.waitConnected();
+      return account;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'MetaAPI account unavailable';
+      this.logger.warn(`getMetatraderAccountForHistory: ${message}`);
+      return state.currentAccount;
+    }
+  }
+
   getStatus(): {
     connected: boolean;
     synchronized: boolean;
