@@ -12,3 +12,11 @@ export const FOREX_FACTORY_SOURCE_FILTER = {
     NEWS_SOURCE_FOREX_FACTORY_NEWS,
   ],
 } as const;
+
+export const FOREX_FACTORY_NEWS_SOURCE_FILTER = {
+  in: ['forexfactory', NEWS_SOURCE_FOREX_FACTORY_NEWS],
+} as const;
+
+export const FOREX_FACTORY_INDICATOR_SOURCE_FILTER = {
+  in: [NEWS_SOURCE_FOREX_FACTORY_INDICATOR],
+} as const;

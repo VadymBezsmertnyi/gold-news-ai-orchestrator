@@ -9,6 +9,7 @@ import {
   NEWS_SOURCE_FOREX_FACTORY_NEWS,
 } from './news-forexfactory.constants';
 import type {
+  ForexFactoryApiStatus,
   ForexFactoryFetchResult,
   ForexFactoryNewsEvent,
   ForexFactorySourceType,
@@ -21,6 +22,12 @@ import {
   getNewsSyncFutureHours,
   getNewsSyncPastHours,
 } from './news-sync-window';
+
+export interface ForexFactoryApiFetchResult {
+  events: ForexFactoryNewsEvent[];
+  apiStatus: ForexFactoryApiStatus;
+  apiUrl: string;
+}
 
 @Injectable()
 export class NewsForexFactoryClient {
@@ -77,7 +84,7 @@ export class NewsForexFactoryClient {
   async fetchIndicatorsDataToNewsEvents(
     fromDate?: Date,
     toDate?: Date,
-  ): Promise<NewsApiResponse> {
+  ): Promise<ForexFactoryApiFetchResult> {
     const url = this.getIndicatorsApiUrl(fromDate, toDate);
     try {
       const response = await this.http.get<IndicatorsApiResponse>(url);
@@ -99,28 +106,29 @@ export class NewsForexFactoryClient {
           forexFactoryType: 'INDICATOR' as const,
         }),
       );
-      return { events, has_more: false };
+      return { events, apiStatus: 'ok', apiUrl: url };
     } catch (error: unknown) {
       const status = axios.isAxiosError(error)
         ? error.response?.status
         : undefined;
       if (status === 403) {
         this.logger.warn(
-          `Forex Factory indicators API returned 403 — using cached DB data. URL: ${url}`,
+          `Forex Factory indicators API returned 403 — will use cached DB data. URL: ${url}`,
         );
-        return { events: [], has_more: false };
+        return { events: [], apiStatus: 'forbidden', apiUrl: url };
       }
       this.logger.error('Error fetching indicators data', error);
-      throw error;
+      return { events: [], apiStatus: 'error', apiUrl: url };
     }
   }
 
   /**
    * XauSync: `fetchNewsEvents` — regular news headlines (calendar upcoming).
    */
-  async fetchNewsEvents(): Promise<NewsApiResponse> {
+  async fetchNewsEvents(): Promise<ForexFactoryApiFetchResult> {
+    const url = NEWS_API_URL;
     try {
-      const response = await this.http.get<NewsApiResponse>(NEWS_API_URL);
+      const response = await this.http.get<NewsApiResponse>(url);
       const events: ForexFactoryNewsEvent[] = response.data.events.map(
         (event) => ({
           ...event,
@@ -133,19 +141,19 @@ export class NewsForexFactoryClient {
           forexFactoryType: 'NEWS' as const,
         }),
       );
-      return { events, has_more: response.data.has_more };
+      return { events, apiStatus: 'ok', apiUrl: url };
     } catch (error: unknown) {
       const status = axios.isAxiosError(error)
         ? error.response?.status
         : undefined;
       if (status === 403) {
         this.logger.warn(
-          `Forex Factory news API returned 403 — using cached DB data. URL: ${NEWS_API_URL}`,
+          `Forex Factory news API returned 403 — will use cached DB data. URL: ${url}`,
         );
-        return { events: [], has_more: false };
+        return { events: [], apiStatus: 'forbidden', apiUrl: url };
       }
       this.logger.error('Error fetching news events', error);
-      throw error;
+      return { events: [], apiStatus: 'error', apiUrl: url };
     }
   }
 
@@ -174,7 +182,6 @@ export class NewsForexFactoryClient {
     return id.length > 0 ? id : null;
   }
 
-  /** Stored idApi — scoped by source type so indicator/news ids never collide. */
   toStoredIdApi(sourceType: ForexFactorySourceType, rawIdApi: string): string {
     return `${sourceType.toLowerCase()}:${rawIdApi}`;
   }
@@ -191,9 +198,6 @@ export class NewsForexFactoryClient {
     return `${this.sourceForType(event.forexFactoryType)}:${rawId}`;
   }
 
-  /**
-   * Dedup priority: idApi+sourceType → externalId → dateline+normalized title (per type).
-   */
   dedupeEvents(events: ForexFactoryNewsEvent[]): ForexFactoryNewsEvent[] {
     const byPrimary = new Map<string, ForexFactoryNewsEvent>();
     const externalAlias = new Map<string, string>();
@@ -250,42 +254,31 @@ export class NewsForexFactoryClient {
   }
 
   /**
-   * XauSync strategy: indicators + news APIs, rolling window on dateline, then dedupe.
+   * API-only fetch (no DB fallback). Service layer applies cache like XauSync index.ts.
    */
-  async fetchMergedGoldNews(
-    now = new Date(),
-  ): Promise<ForexFactoryFetchResult> {
-    const range = this.getSyncTimeRange(now);
-    const indicatorsUrl = this.getIndicatorsApiUrl(
-      range.fromDate,
-      range.toDate,
-    );
-    const newsUrl = this.getNewsApiUrl();
-
-    const [indicatorsResponse, newsResponse] = await Promise.all([
-      this.fetchIndicatorsDataToNewsEvents(range.fromDate, range.toDate),
-      this.fetchNewsEvents(),
-    ]);
-
-    const indicatorsRaw = indicatorsResponse.events;
-    const newsRaw = newsResponse.events;
-
+  fetchMergedGoldNewsFromApi(
+    indicatorsApi: ForexFactoryApiFetchResult,
+    newsApi: ForexFactoryApiFetchResult,
+    range: SyncTimeWindow & { fromDate: Date; toDate: Date },
+  ): Omit<
+    ForexFactoryFetchResult,
+    'events' | 'total' | 'impactBreakdown' | 'indicators' | 'news'
+  > & {
+    indicatorsRaw: ForexFactoryNewsEvent[];
+    newsRaw: ForexFactoryNewsEvent[];
+    indicatorsInWindow: ForexFactoryNewsEvent[];
+    newsInWindow: ForexFactoryNewsEvent[];
+  } {
     const indicatorsInWindow = this.filterByTimeWindow(
-      indicatorsRaw,
+      indicatorsApi.events,
       range.fromSec,
       range.toSec,
     );
     const newsInWindow = this.filterByTimeWindow(
-      newsRaw,
+      newsApi.events,
       range.fromSec,
       range.toSec,
     );
-
-    const indicatorsDeduped = this.dedupeEvents(indicatorsInWindow);
-    const newsDeduped = this.dedupeEvents(newsInWindow);
-
-    const mergedInWindow = [...indicatorsInWindow, ...newsInWindow];
-    const events = this.dedupeEvents(mergedInWindow);
 
     return {
       timeWindow: {
@@ -294,24 +287,70 @@ export class NewsForexFactoryClient {
         fromSec: range.fromSec,
         toSec: range.toSec,
       },
-      indicatorsUrl,
-      newsUrl,
+      indicatorsUrl: indicatorsApi.apiUrl,
+      newsUrl: newsApi.apiUrl,
+      newsApiStatus: newsApi.apiStatus,
+      indicatorsApiStatus: indicatorsApi.apiStatus,
+      indicatorsRaw: indicatorsApi.events,
+      newsRaw: newsApi.events,
+      indicatorsInWindow,
+      newsInWindow,
+    };
+  }
+
+  buildFetchResult(
+    range: SyncTimeWindow,
+    indicatorsApi: {
+      apiStatus: ForexFactoryApiStatus;
+      apiUrl: string;
+      raw: ForexFactoryNewsEvent[];
+      inWindow: ForexFactoryNewsEvent[];
+      fallbackCount: number;
+    },
+    newsApi: {
+      apiStatus: ForexFactoryApiStatus;
+      apiUrl: string;
+      raw: ForexFactoryNewsEvent[];
+      inWindow: ForexFactoryNewsEvent[];
+      fallbackCount: number;
+    },
+  ): ForexFactoryFetchResult {
+    const indicatorsDeduped = this.dedupeEvents(indicatorsApi.inWindow);
+    const newsDeduped = this.dedupeEvents(newsApi.inWindow);
+    const mergedInWindow = [
+      ...indicatorsApi.inWindow,
+      ...newsApi.inWindow,
+    ];
+    const events = this.dedupeEvents(mergedInWindow);
+
+    return {
+      timeWindow: range,
+      indicatorsUrl: indicatorsApi.apiUrl,
+      newsUrl: newsApi.apiUrl,
+      newsApiStatus: newsApi.apiStatus,
+      indicatorsApiStatus: indicatorsApi.apiStatus,
       indicators: {
-        raw: indicatorsRaw.length,
-        afterWindow: indicatorsInWindow.length,
+        apiStatus: indicatorsApi.apiStatus,
+        apiUrl: indicatorsApi.apiUrl,
+        raw: indicatorsApi.raw.length,
+        afterWindow: indicatorsApi.inWindow.length,
         afterDedup: indicatorsDeduped.length,
+        fallbackCount: indicatorsApi.fallbackCount,
         events: indicatorsDeduped,
-        rawInWindow: indicatorsInWindow,
+        rawInWindow: indicatorsApi.inWindow,
       },
       news: {
-        raw: newsRaw.length,
-        afterWindow: newsInWindow.length,
+        apiStatus: newsApi.apiStatus,
+        apiUrl: newsApi.apiUrl,
+        raw: newsApi.raw.length,
+        afterWindow: newsApi.inWindow.length,
         afterDedup: newsDeduped.length,
+        fallbackCount: newsApi.fallbackCount,
         events: newsDeduped,
-        rawInWindow: newsInWindow,
+        rawInWindow: newsApi.inWindow,
       },
       total: {
-        raw: indicatorsRaw.length + newsRaw.length,
+        raw: indicatorsApi.raw.length + newsApi.raw.length,
         afterWindow: mergedInWindow.length,
         afterDedup: events.length,
       },

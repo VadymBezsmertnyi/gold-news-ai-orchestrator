@@ -1,5 +1,7 @@
 export type ForexFactorySourceType = 'INDICATOR' | 'NEWS';
 
+export type ForexFactoryApiStatus = 'ok' | 'forbidden' | 'error';
+
 export interface ForexFactoryNewsEvent {
   idApi?: string;
   id?: number | string;
@@ -51,9 +53,12 @@ export interface ImpactBreakdown {
 }
 
 export interface SourceFetchSlice {
+  apiStatus: ForexFactoryApiStatus;
+  apiUrl: string;
   raw: number;
   afterWindow: number;
   afterDedup: number;
+  fallbackCount: number;
   events: ForexFactoryNewsEvent[];
   rawInWindow: ForexFactoryNewsEvent[];
 }
@@ -62,6 +67,8 @@ export interface ForexFactoryFetchResult {
   timeWindow: SyncTimeWindow;
   indicatorsUrl: string;
   newsUrl: string;
+  newsApiStatus: ForexFactoryApiStatus;
+  indicatorsApiStatus: ForexFactoryApiStatus;
   indicators: SourceFetchSlice;
   news: SourceFetchSlice;
   total: {
@@ -76,6 +83,7 @@ export interface ForexFactoryFetchResult {
 export interface SourceSyncStats {
   raw: number;
   afterWindow: number;
+  fallbackCount: number;
   created: number;
   updated: number;
   skipped: number;
@@ -83,6 +91,8 @@ export interface SourceSyncStats {
 
 export interface SyncNewsResult {
   timeWindow: SyncTimeWindow;
+  newsApiStatus: ForexFactoryApiStatus;
+  newsApiUrl: string;
   indicators: SourceSyncStats;
   news: SourceSyncStats;
   total: SourceSyncStats & { afterDedup: number };
@@ -94,19 +104,17 @@ export interface NewsDebugSourceResult {
   timeWindow: SyncTimeWindow;
   syncPastHours: number;
   syncFutureHours: number;
-  indicatorsUrl: string;
-  newsUrl: string;
-  indicators: {
-    rawCount: number;
-    afterWindowCount: number;
-    afterDedupCount: number;
-  };
-  news: {
-    rawCount: number;
-    afterWindowCount: number;
-    afterDedupCount: number;
-  };
-  mergedCount: number;
+  newsApiStatus: ForexFactoryApiStatus;
+  newsApiUrl: string;
+  indicatorsApiUrl: string;
+  newsRawCount: number;
+  newsFallbackCount: number;
+  newsAfterWindowCount: number;
+  indicatorsRawCount: number;
+  indicatorsFallbackCount: number;
+  indicatorsAfterWindowCount: number;
+  mergedAfterWindowCount: number;
+  mergedAfterDedupCount: number;
   savedCount: number;
   oldestSavedEventStartAt: string | null;
   newestSavedEventStartAt: string | null;

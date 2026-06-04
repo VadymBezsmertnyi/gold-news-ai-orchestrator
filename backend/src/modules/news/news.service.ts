@@ -5,10 +5,16 @@ import { NewsAnalysisStatus, type NewsItem, type Prisma } from '@prisma/client';
 import { PrismaService } from '../../common/prisma/prisma.service';
 
 // local
-import { FOREX_FACTORY_SOURCE_FILTER } from './news-forexfactory.constants';
+import {
+  FOREX_FACTORY_INDICATOR_SOURCE_FILTER,
+  FOREX_FACTORY_NEWS_SOURCE_FILTER,
+  FOREX_FACTORY_SOURCE_FILTER,
+} from './news-forexfactory.constants';
 import { NewsForexFactoryClient } from './news-forexfactory.client';
 import type {
+  ForexFactoryFetchResult,
   ForexFactoryNewsEvent,
+  ForexFactorySourceType,
   NewsDebugSourceResult,
   SourceSyncStats,
   SyncNewsResult,
@@ -21,6 +27,7 @@ import {
 const emptySourceStats = (): SourceSyncStats => ({
   raw: 0,
   afterWindow: 0,
+  fallbackCount: 0,
   created: 0,
   updated: 0,
   skipped: 0,
@@ -52,19 +59,169 @@ export class NewsService {
     return this.syncFromForexFactory();
   }
 
+  /**
+   * XauSync parity: fetch APIs, apply rolling window, merge with DB cache on 403.
+   */
+  async fetchMergedWithFallback(now = new Date()): Promise<ForexFactoryFetchResult> {
+    const range = this.ffClient.getSyncTimeRange(now);
+
+    const [indicatorsApi, newsApi] = await Promise.all([
+      this.ffClient.fetchIndicatorsDataToNewsEvents(
+        range.fromDate,
+        range.toDate,
+      ),
+      this.ffClient.fetchNewsEvents(),
+    ]);
+
+    const apiSlice = this.ffClient.fetchMergedGoldNewsFromApi(
+      indicatorsApi,
+      newsApi,
+      range,
+    );
+
+    let indicatorsInWindow = apiSlice.indicatorsInWindow;
+    let newsInWindow = apiSlice.newsInWindow;
+    let indicatorsFallbackCount = 0;
+    let newsFallbackCount = 0;
+
+    if (indicatorsApi.apiStatus === 'forbidden') {
+      const cached = await this.loadCachedIndicatorEventsInWindow(range);
+      indicatorsFallbackCount = cached.length;
+      indicatorsInWindow = this.ffClient.dedupeEvents([
+        ...indicatorsInWindow,
+        ...cached,
+      ]);
+      this.logger.warn(
+        `Indicators API forbidden — loaded ${indicatorsFallbackCount} cached indicator events from DB`,
+      );
+    }
+
+    if (newsApi.apiStatus === 'forbidden') {
+      const cached = await this.loadCachedNewsEventsInWindow(range);
+      newsFallbackCount = cached.length;
+      newsInWindow = this.ffClient.dedupeEvents([...newsInWindow, ...cached]);
+      this.logger.warn(
+        `News API forbidden — loaded ${newsFallbackCount} cached regular news events from DB`,
+      );
+    }
+
+    return this.ffClient.buildFetchResult(
+      apiSlice.timeWindow,
+      {
+        apiStatus: indicatorsApi.apiStatus,
+        apiUrl: indicatorsApi.apiUrl,
+        raw: indicatorsApi.events,
+        inWindow: indicatorsInWindow,
+        fallbackCount: indicatorsFallbackCount,
+      },
+      {
+        apiStatus: newsApi.apiStatus,
+        apiUrl: newsApi.apiUrl,
+        raw: newsApi.events,
+        inWindow: newsInWindow,
+        fallbackCount: newsFallbackCount,
+      },
+    );
+  }
+
+  /** XauSync `getStoredNewsEventsByRange` — regular news rows only. */
+  async loadCachedNewsEventsInWindow(
+    range: { fromDate: Date; toDate: Date },
+  ): Promise<ForexFactoryNewsEvent[]> {
+    const items = await this.prisma.newsItem.findMany({
+      where: {
+        source: { in: [...FOREX_FACTORY_NEWS_SOURCE_FILTER.in] },
+        eventStartAt: { gte: range.fromDate, lte: range.toDate },
+      },
+      orderBy: { eventStartAt: 'asc' },
+    });
+    return items
+      .map((item) => this.newsItemToForexFactoryEvent(item, 'NEWS'))
+      .filter((e): e is ForexFactoryNewsEvent => e != null);
+  }
+
+  async loadCachedIndicatorEventsInWindow(
+    range: { fromDate: Date; toDate: Date },
+  ): Promise<ForexFactoryNewsEvent[]> {
+    const items = await this.prisma.newsItem.findMany({
+      where: {
+        source: { in: [...FOREX_FACTORY_INDICATOR_SOURCE_FILTER.in] },
+        eventStartAt: { gte: range.fromDate, lte: range.toDate },
+      },
+      orderBy: { eventStartAt: 'asc' },
+    });
+    return items
+      .map((item) => this.newsItemToForexFactoryEvent(item, 'INDICATOR'))
+      .filter((e): e is ForexFactoryNewsEvent => e != null);
+  }
+
+  newsItemToForexFactoryEvent(
+    item: NewsItem,
+    type: ForexFactorySourceType,
+  ): ForexFactoryNewsEvent | null {
+    const dateline =
+      item.dateline ??
+      (item.eventStartAt
+        ? Math.floor(item.eventStartAt.getTime() / 1000)
+        : null);
+    if (dateline == null) return null;
+
+    const payload =
+      item.rawPayload != null && typeof item.rawPayload === 'object'
+        ? (item.rawPayload as Record<string, unknown>)
+        : null;
+
+    let rawIdApi: string | null = null;
+    if (payload?.idApi != null) rawIdApi = String(payload.idApi);
+    else if (item.idApi) {
+      rawIdApi = item.idApi.replace(/^(indicator|news):/i, '');
+    }
+    if (!rawIdApi) return null;
+
+    const impactValue =
+      item.impactValue ??
+      (typeof payload?.impact_value === 'number' ? payload.impact_value : 0);
+
+    return {
+      idApi: rawIdApi,
+      title: item.title,
+      impact_value: impactValue,
+      dateline,
+      country:
+        (typeof payload?.country === 'string' ? payload.country : undefined) ??
+        undefined,
+      date: item.eventDate ?? undefined,
+      time: item.eventTime ?? undefined,
+      impact:
+        (typeof payload?.impact === 'string' ? payload.impact : undefined) ??
+        undefined,
+      impact_name:
+        (typeof payload?.impact_name === 'string'
+          ? payload.impact_name
+          : undefined) ?? undefined,
+      forecast: item.forecast ?? undefined,
+      previous: item.previous ?? undefined,
+      details_url: item.url ?? undefined,
+      forexFactoryType: type,
+    };
+  }
+
   async syncFromForexFactory(): Promise<SyncNewsResult> {
-    const fetch = await this.ffClient.fetchMergedGoldNews();
+    const fetch = await this.fetchMergedWithFallback();
 
     const indicators = emptySourceStats();
     indicators.raw = fetch.indicators.raw;
     indicators.afterWindow = fetch.indicators.afterWindow;
+    indicators.fallbackCount = fetch.indicators.fallbackCount;
 
     const news = emptySourceStats();
     news.raw = fetch.news.raw;
     news.afterWindow = fetch.news.afterWindow;
+    news.fallbackCount = fetch.news.fallbackCount;
 
     for (const event of fetch.events) {
-      const stats = event.forexFactoryType === 'INDICATOR' ? indicators : news;
+      const stats =
+        event.forexFactoryType === 'INDICATOR' ? indicators : news;
       const outcome = await this.upsertForexFactoryEvent(event);
       if (outcome === 'created') stats.created++;
       else if (outcome === 'updated') stats.updated++;
@@ -75,6 +232,7 @@ export class NewsService {
       raw: fetch.total.raw,
       afterWindow: fetch.total.afterWindow,
       afterDedup: fetch.total.afterDedup,
+      fallbackCount: indicators.fallbackCount + news.fallbackCount,
       created: indicators.created + news.created,
       updated: indicators.updated + news.updated,
       skipped: indicators.skipped + news.skipped,
@@ -82,6 +240,8 @@ export class NewsService {
 
     const result: SyncNewsResult = {
       timeWindow: fetch.timeWindow,
+      newsApiStatus: fetch.newsApiStatus,
+      newsApiUrl: fetch.newsUrl,
       indicators,
       news,
       total,
@@ -90,9 +250,9 @@ export class NewsService {
 
     this.logger.log(
       `FF sync ${result.timeWindow.from} → ${result.timeWindow.to} ` +
-        `indicators raw=${indicators.raw} window=${indicators.afterWindow} +${indicators.created} ~${indicators.updated} skip=${indicators.skipped} ` +
-        `news raw=${news.raw} window=${news.afterWindow} +${news.created} ~${news.updated} skip=${news.skipped} ` +
-        `total dedup=${total.afterDedup} impact=${JSON.stringify(result.impactBreakdown)}`,
+        `newsApi=${result.newsApiStatus} newsRaw=${news.raw} newsFallback=${news.fallbackCount} newsWindow=${news.afterWindow} ` +
+        `indicatorsRaw=${indicators.raw} indicatorsFallback=${indicators.fallbackCount} indicatorsWindow=${indicators.afterWindow} ` +
+        `merged=${total.afterDedup} saved ops +${total.created}/~${total.updated}`,
     );
 
     return result;
@@ -136,7 +296,7 @@ export class NewsService {
 
   async getDebugSource(): Promise<NewsDebugSourceResult> {
     const now = new Date();
-    const fetch = await this.ffClient.fetchMergedGoldNews(now);
+    const fetch = await this.fetchMergedWithFallback(now);
     const range = fetch.timeWindow;
     const fromDate = new Date(range.fromSec * 1000);
     const toDate = new Date(range.toSec * 1000);
@@ -146,7 +306,7 @@ export class NewsService {
         source: { in: [...FOREX_FACTORY_SOURCE_FILTER.in] },
         eventStartAt: { gte: fromDate, lte: toDate },
       },
-      select: { eventStartAt: true },
+      select: { eventStartAt: true, source: true },
       orderBy: { eventStartAt: 'asc' },
     });
 
@@ -163,19 +323,17 @@ export class NewsService {
       timeWindow: range,
       syncPastHours: getNewsSyncPastHours(),
       syncFutureHours: getNewsSyncFutureHours(),
-      indicatorsUrl: fetch.indicatorsUrl,
-      newsUrl: fetch.newsUrl,
-      indicators: {
-        rawCount: fetch.indicators.raw,
-        afterWindowCount: fetch.indicators.afterWindow,
-        afterDedupCount: fetch.indicators.afterDedup,
-      },
-      news: {
-        rawCount: fetch.news.raw,
-        afterWindowCount: fetch.news.afterWindow,
-        afterDedupCount: fetch.news.afterDedup,
-      },
-      mergedCount: fetch.total.afterDedup,
+      newsApiStatus: fetch.newsApiStatus,
+      newsApiUrl: fetch.newsUrl,
+      indicatorsApiUrl: fetch.indicatorsUrl,
+      newsRawCount: fetch.news.raw,
+      newsFallbackCount: fetch.news.fallbackCount,
+      newsAfterWindowCount: fetch.news.afterWindow,
+      indicatorsRawCount: fetch.indicators.raw,
+      indicatorsFallbackCount: fetch.indicators.fallbackCount,
+      indicatorsAfterWindowCount: fetch.indicators.afterWindow,
+      mergedAfterWindowCount: fetch.total.afterWindow,
+      mergedAfterDedupCount: fetch.total.afterDedup,
       savedCount: saved.length,
       oldestSavedEventStartAt: oldest?.toISOString() ?? null,
       newestSavedEventStartAt: newest?.toISOString() ?? null,
