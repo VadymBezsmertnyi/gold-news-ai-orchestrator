@@ -115,6 +115,7 @@ export class NewsService {
 
       if (
         calendarApi.apiStatus === 'forbidden' &&
+        mdsApi.apiStatus !== 'ok' &&
         newsInWindow.length === 0 &&
         cachedNews.length > 0
       ) {
