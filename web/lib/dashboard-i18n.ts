@@ -14,37 +14,51 @@ export const STATS_LABELS = {
 export const SECTION_TITLES = {
   globalContext: "Глобальний контекст ринку",
   predictions: "Прогнози",
-  importantPredictions: "Важливі прогнози",
-  otherPredictions: "Інші прогнози",
-  importantNews: "Важливі новини",
-  otherNews: "Інші новини",
   recentNews: "Останні новини",
-  pendingNews: "Новини в черзі на аналіз",
   promptImprovements: "Покращення промптів",
   deprecatedRules: "Застарілі (ринкові) правила",
   logs: "Фонові процеси / логи сервера",
 } as const;
 
-export const PREDICTION_HEADERS = {
-  news: "Новина",
-  source: "Тип",
-  impact: "Вплив",
-  direction: "Напрям",
-  confidence: "Впевненість",
-  status: "Статус",
-  eventState: "Стан події",
-  pricePrediction: "Ціна прогнозу",
-  priceEventStart: "Ціна старту",
-  baselineSource: "Джерело старту",
-  current: "Фінальна",
-  actualMove: "Факт Δ%",
-  expectedMove: "Очік. рух",
+export const ROW_DETAILS_LABELS = {
+  expand: "Деталі",
+  collapse: "Згорнути",
+} as const;
+
+export const PREDICTION_DETAIL_LABELS = {
+  source: "Тип прогнозу",
+  baselineSource: "Джерело стартової ціни",
+  eventDuration: "Тривалість події",
+  eventStart: "Старт події",
+  eventEnd: "Кінець події",
+  pricePrediction: "Ціна на момент прогнозу",
+  priceEventStart: "Стартова ціна",
+  liveEvaluation: "Live оцінка",
   moveAccuracy: "Точність руху",
   finalScore: "Підсумкова оцінка",
-  directionGuess: "Напрям",
-  liveEvaluation: "Live оцінка",
-  eventStart: "Старт",
-  eventEnd: "Кінець",
+  directionGuess: "Напрям вгадано",
+} as const;
+
+export const NEWS_DETAIL_LABELS = {
+  source: "Джерело",
+  published: "Опубліковано",
+  category: "Категорія",
+  summary: "Аналіз",
+} as const;
+
+export const PREDICTION_HEADERS = {
+  news: "Новина",
+  impact: "Вплив",
+  direction: "Напрям",
+  confidence: "Впевн.",
+  status: "Статус",
+  eventState: "Стан події",
+  expectedPrice: "Ціль",
+  finalPrice: "Зараз",
+  expectedMove: "Очік.%",
+  actualMove: "Факт%",
+  distanceToTarget: "Δцілі%",
+  liveEvaluation: "Live",
 } as const;
 
 export function translateDirectionGuessBadge(value: boolean | null): {
@@ -90,13 +104,8 @@ const ANALYSIS_STATUS_UA: Record<string, string> = {
   FAILED: "Помилка",
 };
 
-export const PREDICTION_IMPORTANT_HINT =
-  "Важливі прогнози включають HIGH новини, глобальний контекст, високу впевненість (≥70%) або вже неуспішні результати.";
-
-export const IMPORTANT_NEWS_EMPTY = "Немає важливих новин у поточному вікні.";
-
 export const CHIP_LABELS = {
-  important: "Важливих прогнозів",
+  highImpact: "HIGH / глобальні",
   success: "Успішних",
   failed: "Неуспішних",
   pending: "Очікують",

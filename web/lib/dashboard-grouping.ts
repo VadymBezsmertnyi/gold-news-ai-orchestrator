@@ -1,48 +1,50 @@
 import type { DashboardNewsRow, DashboardPredictionRow } from "./types";
+import { sortPredictionsByCheckAfter } from "./dashboard-format";
 
-export function isImportantPrediction(row: DashboardPredictionRow): boolean {
-  if (row.sourceType === "GLOBAL_CONTEXT") return true;
-  if (row.result === "FAILED" || row.status === "FAILED") return true;
-  if (row.confidence >= 70) return true;
-  if ((row.impactLevel ?? "").toUpperCase() === "HIGH") return true;
-  return false;
+/** Lower = higher priority (HIGH first). GLOBAL_CONTEXT sorts with HIGH. */
+export function impactSortOrder(
+  level: string | null,
+  sourceType?: string,
+): number {
+  if (sourceType === "GLOBAL_CONTEXT") return 0;
+  const key = (level ?? "").toUpperCase();
+  if (key === "HIGH") return 1;
+  if (key === "MEDIUM") return 2;
+  if (key === "LOW") return 3;
+  return 4;
 }
 
-export function splitPredictions(rows: DashboardPredictionRow[]): {
-  important: DashboardPredictionRow[];
-  other: DashboardPredictionRow[];
-} {
-  const important: DashboardPredictionRow[] = [];
-  const other: DashboardPredictionRow[] = [];
-  for (const row of rows) {
-    if (isImportantPrediction(row)) important.push(row);
-    else other.push(row);
-  }
-  return { important, other };
+export function sortPredictionsByImpact(
+  rows: DashboardPredictionRow[],
+): DashboardPredictionRow[] {
+  const ordered = sortPredictionsByCheckAfter(rows);
+  return [...ordered].sort((a, b) => {
+    const impactDiff =
+      impactSortOrder(a.impactLevel, a.sourceType) -
+      impactSortOrder(b.impactLevel, b.sourceType);
+    if (impactDiff !== 0) return impactDiff;
+    return 0;
+  });
 }
 
-export function isImportantNews(row: DashboardNewsRow): boolean {
-  const level = (row.impactLevel ?? "").toUpperCase();
-  return level === "HIGH" || level === "MEDIUM";
-}
-
-export function splitNews(rows: DashboardNewsRow[]): {
-  important: DashboardNewsRow[];
-  other: DashboardNewsRow[];
-} {
-  const important: DashboardNewsRow[] = [];
-  const other: DashboardNewsRow[] = [];
-  for (const row of rows) {
-    if (isImportantNews(row)) important.push(row);
-    else other.push(row);
-  }
-  return { important, other };
+export function sortNewsByImpact(rows: DashboardNewsRow[]): DashboardNewsRow[] {
+  return [...rows].sort((a, b) => {
+    const impactDiff =
+      impactSortOrder(a.impactLevel) - impactSortOrder(b.impactLevel);
+    if (impactDiff !== 0) return impactDiff;
+    return (
+      new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()
+    );
+  });
 }
 
 export function predictionSummaryChips(rows: DashboardPredictionRow[]) {
-  const { important } = splitPredictions(rows);
   return {
-    important: important.length,
+    highImpact: rows.filter(
+      (r) =>
+        r.sourceType === "GLOBAL_CONTEXT" ||
+        (r.impactLevel ?? "").toUpperCase() === "HIGH",
+    ).length,
     success: rows.filter((r) => r.result === "SUCCESS").length,
     failed: rows.filter((r) => r.result === "FAILED").length,
     pending: rows.filter((r) => r.status === "PENDING" && !r.result).length,

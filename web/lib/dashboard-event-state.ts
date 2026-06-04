@@ -1,36 +1,13 @@
-/** Relative Ukrainian labels for prediction event window vs now. */
+import { formatTimeUk } from "./dashboard-format";
+import { formatDurationDdHhMm } from "./dashboard-duration";
 
 export type EventStateTone = "upcoming" | "active" | "ended";
 
 export interface EventStateDisplay {
-  primary: string;
-  secondary: string | null;
+  title: string;
+  line2: string | null;
+  line3: string | null;
   tone: EventStateTone;
-}
-
-function formatDurationParts(totalMins: number): string {
-  if (totalMins < 60) return `${totalMins} хв`;
-
-  const days = Math.floor(totalMins / (60 * 24));
-  if (days >= 1) {
-    const dayWord = days === 1 ? "день" : days < 5 ? "дні" : "днів";
-    return `${days} ${dayWord}`;
-  }
-
-  const hours = Math.floor(totalMins / 60);
-  const mins = totalMins % 60;
-  if (mins === 0) return `${hours} год`;
-  return `${hours} год ${mins} хв`;
-}
-
-function formatUntil(ms: number): string {
-  const totalMins = Math.max(1, Math.ceil(ms / 60_000));
-  return formatDurationParts(totalMins);
-}
-
-function formatAgo(ms: number): string {
-  const totalMins = Math.max(1, Math.ceil(ms / 60_000));
-  return `${formatDurationParts(totalMins)} тому`;
 }
 
 export function formatEventState(
@@ -43,33 +20,50 @@ export function formatEventState(
   const end = new Date(eventEndAt ?? checkAfter);
 
   if (!start || Number.isNaN(start.getTime())) {
-    return { primary: "—", secondary: null, tone: "ended" };
+    return { title: "—", line2: null, line3: null, tone: "ended" };
   }
 
   const nowMs = now.getTime();
+  const startMs = start.getTime();
+  const endMs = end.getTime();
 
-  if (nowMs < start.getTime()) {
-    const diff = start.getTime() - nowMs;
+  if (nowMs < startMs) {
     return {
-      primary: `Почнеться через ${formatUntil(diff)}`,
-      secondary: null,
+      title: "Starts soon",
+      line2: `in ${formatDurationDdHhMm(startMs - nowMs)}`,
+      line3: `at ${formatTimeUk(start)}`,
       tone: "upcoming",
     };
   }
 
-  if (nowMs <= end.getTime()) {
-    const remaining = end.getTime() - nowMs;
+  if (nowMs <= endMs) {
+    const remaining = Math.max(0, endMs - nowMs);
     return {
-      primary: "Активна",
-      secondary: remaining > 0 ? `ще ${formatUntil(remaining)}` : null,
+      title: "Active",
+      line2: `remaining ${formatDurationDdHhMm(remaining)}`,
+      line3: `until ${formatTimeUk(end)}`,
       tone: "active",
     };
   }
 
-  const ago = nowMs - end.getTime();
+  const ago = nowMs - endMs;
   return {
-    primary: "Завершилась",
-    secondary: formatAgo(ago),
+    title: "Finished",
+    line2: `${formatDurationDdHhMm(ago)} ago`,
+    line3: null,
     tone: "ended",
   };
+}
+
+export function formatEventWindowDuration(
+  eventStartAt: string | null,
+  eventEndAt: string | null,
+  checkAfter: string,
+): string | null {
+  if (!eventStartAt) return null;
+  const start = new Date(eventStartAt);
+  const end = new Date(eventEndAt ?? checkAfter);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  const ms = Math.max(0, end.getTime() - start.getTime());
+  return formatDurationDdHhMm(ms);
 }
