@@ -19,6 +19,7 @@ import type {
   SourceSyncStats,
   SyncNewsResult,
 } from './news-forexfactory.types';
+import { hasForexFactoryCookie } from './news-forexfactory.http-config';
 import {
   getNewsSyncFutureHours,
   getNewsSyncPastHours,
@@ -86,30 +87,44 @@ export class NewsService {
     let indicatorsFallbackCount = 0;
     let newsFallbackCount = 0;
 
-    if (mdsApi.apiStatus === 'forbidden') {
-      const cachedIndicators =
-        await this.loadCachedIndicatorEventsInWindow(range);
-      indicatorsFallbackCount = cachedIndicators.length;
-      indicatorsInWindow = this.ffClient.dedupeEvents([
-        ...indicatorsInWindow,
-        ...cachedIndicators,
-      ]);
-    }
+    if (
+      mdsApi.apiStatus === 'forbidden' ||
+      calendarApi.apiStatus === 'forbidden'
+    ) {
+      const cached = await this.loadCachedAllForexFactoryInWindow(range);
+      const cachedNews = cached.filter((e) => e.forexFactoryType === 'NEWS');
+      const cachedIndicators = cached.filter(
+        (e) => e.forexFactoryType === 'INDICATOR',
+      );
 
-    if (calendarApi.apiStatus === 'forbidden' && newsInWindow.length === 0) {
-      const cachedNews = await this.loadCachedNewsEventsInWindow(range);
-      newsFallbackCount = cachedNews.length;
-      newsInWindow = this.ffClient.dedupeEvents([
-        ...newsInWindow,
-        ...cachedNews,
-      ]);
-      if (newsFallbackCount > 0) {
+      if (mdsApi.apiStatus === 'forbidden') {
+        indicatorsFallbackCount = cachedIndicators.length;
+        newsFallbackCount = cachedNews.length;
+        indicatorsInWindow = this.ffClient.dedupeEvents([
+          ...indicatorsInWindow,
+          ...cachedIndicators,
+        ]);
+        newsInWindow = this.ffClient.dedupeEvents([
+          ...newsInWindow,
+          ...cachedNews,
+        ]);
         this.logger.warn(
-          `Calendar API forbidden — loaded ${newsFallbackCount} cached news from DB`,
+          `mds-api forbidden — DB fallback: news=${newsFallbackCount} indicators=${indicatorsFallbackCount}`,
         );
-      } else if (mdsApi.apiStatus === 'ok' && apiSlice.newsRaw.length === 0) {
+      }
+
+      if (
+        calendarApi.apiStatus === 'forbidden' &&
+        newsInWindow.length === 0 &&
+        cachedNews.length > 0
+      ) {
+        newsFallbackCount = cachedNews.length;
+        newsInWindow = this.ffClient.dedupeEvents([
+          ...newsInWindow,
+          ...cachedNews,
+        ]);
         this.logger.warn(
-          'Calendar API forbidden and no mds-api news in window — DB cache empty for forexfactory:news',
+          `Calendar forbidden — DB fallback news=${newsFallbackCount}`,
         );
       }
     }
@@ -161,16 +176,48 @@ export class NewsService {
     fromDate: Date;
     toDate: Date;
   }): Promise<ForexFactoryNewsEvent[]> {
+    const all = await this.loadCachedAllForexFactoryInWindow(range);
+    return all.filter((e) => e.forexFactoryType === 'INDICATOR');
+  }
+
+  /** XauSync `getStoredNewsEventsByRange` — all FF rows in window, re-classify by URL. */
+  async loadCachedAllForexFactoryInWindow(range: {
+    fromDate: Date;
+    toDate: Date;
+  }): Promise<ForexFactoryNewsEvent[]> {
     const items = await this.prisma.newsItem.findMany({
       where: {
-        source: { in: [...FOREX_FACTORY_INDICATOR_SOURCE_FILTER.in] },
+        source: { in: [...FOREX_FACTORY_SOURCE_FILTER.in] },
         eventStartAt: { gte: range.fromDate, lte: range.toDate },
       },
       orderBy: { eventStartAt: 'asc' },
     });
     return items
-      .map((item) => this.newsItemToForexFactoryEvent(item, 'INDICATOR'))
+      .map((item) =>
+        this.newsItemToForexFactoryEvent(
+          item,
+          this.inferForexFactoryTypeFromNewsItem(item),
+        ),
+      )
       .filter((e): e is ForexFactoryNewsEvent => e != null);
+  }
+
+  inferForexFactoryTypeFromNewsItem(item: NewsItem): ForexFactorySourceType {
+    const payload =
+      item.rawPayload != null && typeof item.rawPayload === 'object'
+        ? (item.rawPayload as Record<string, unknown>)
+        : null;
+    const urlPath =
+      (typeof payload?.details_url === 'string' ? payload.details_url : null) ??
+      item.url ??
+      (typeof payload?.url === 'string' ? payload.url : null) ??
+      '';
+    if (urlPath.includes('/news/')) return 'NEWS';
+    if (urlPath.includes('/calendar/')) return 'INDICATOR';
+    if (item.source === 'forexfactory' || item.source === 'forexfactory:news') {
+      return 'NEWS';
+    }
+    return 'INDICATOR';
   }
 
   newsItemToForexFactoryEvent(
@@ -340,6 +387,7 @@ export class NewsService {
       timeWindow: range,
       syncPastHours: getNewsSyncPastHours(),
       syncFutureHours: getNewsSyncFutureHours(),
+      forexFactoryCookieConfigured: hasForexFactoryCookie(),
       newsApiStatus: fetch.newsApiStatus,
       newsApiUrl: fetch.newsUrl,
       mdsApiUrl: fetch.mdsApiUrl,

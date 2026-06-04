@@ -107,6 +107,7 @@ export interface NewsDebugSourceResult {
   timeWindow: SyncTimeWindow;
   syncPastHours: number;
   syncFutureHours: number;
+  forexFactoryCookieConfigured: boolean;
   newsApiStatus: ForexFactoryApiStatus;
   newsApiUrl: string;
   mdsApiUrl: string;

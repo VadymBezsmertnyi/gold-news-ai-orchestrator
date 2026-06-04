@@ -5,11 +5,15 @@ import axios, { type AxiosInstance } from 'axios';
 import {
   FF_BASE_URL,
   FF_MDS_BASE_URL,
-  FOREX_FACTORY_HTTP_HEADERS,
   NEWS_CALENDAR_API_URL,
   NEWS_SOURCE_FOREX_FACTORY_INDICATOR,
   NEWS_SOURCE_FOREX_FACTORY_NEWS,
 } from './news-forexfactory.constants';
+import {
+  buildForexFactoryBrowserHeaders,
+  FOREX_FACTORY_403_HINT,
+  hasForexFactoryCookie,
+} from './news-forexfactory.http-config';
 import type {
   ForexFactoryApiStatus,
   ForexFactoryFetchResult,
@@ -35,23 +39,22 @@ export interface ForexFactoryApiFetchResult {
 export class NewsForexFactoryClient {
   private readonly logger = new Logger(NewsForexFactoryClient.name);
 
-  /** www.forexfactory.com (calendar upcoming). */
-  private readonly wwwHttp: AxiosInstance = axios.create({
+  /** Shared client — Chrome-like headers + optional FOREX_FACTORY_COOKIE (Cloudflare). */
+  private readonly http: AxiosInstance = axios.create({
     timeout: 15_000,
-    headers: {
-      ...FOREX_FACTORY_HTTP_HEADERS,
-      'Sec-Fetch-Site': 'same-origin',
-    },
+    headers: buildForexFactoryBrowserHeaders(),
+    maxRedirects: 5,
   });
 
-  /** mds-api.forexfactory.com (breaking news feed — works when www calendar is 403). */
-  private readonly mdsHttp: AxiosInstance = axios.create({
-    timeout: 15_000,
-    headers: {
-      ...FOREX_FACTORY_HTTP_HEADERS,
-      'Sec-Fetch-Site': 'same-site',
-    },
-  });
+  constructor() {
+    if (hasForexFactoryCookie()) {
+      this.logger.log('ForexFactory HTTP: browser cookie configured');
+    } else {
+      this.logger.warn(
+        'ForexFactory HTTP: no FOREX_FACTORY_COOKIE — APIs may return 403 locally',
+      );
+    }
+  }
 
   getNewsCalendarApiUrl(): string {
     return NEWS_CALENDAR_API_URL;
@@ -119,7 +122,7 @@ export class NewsForexFactoryClient {
   ): Promise<ForexFactoryApiFetchResult> {
     const url = this.getMdsApiUrl(fromDate, toDate);
     try {
-      const response = await this.mdsHttp.get<IndicatorsApiResponse>(url);
+      const response = await this.http.get<IndicatorsApiResponse>(url);
       const events: ForexFactoryNewsEvent[] = response.data.data.map((item) => {
         const type = this.classifyMdsEventType(item.url);
         return {
@@ -153,7 +156,7 @@ export class NewsForexFactoryClient {
         : undefined;
       if (status === 403) {
         this.logger.warn(
-          `Forex Factory mds-api returned 403 — will use cached DB data. URL: ${url}`,
+          `Forex Factory mds-api returned 403. URL: ${url}. ${FOREX_FACTORY_403_HINT}`,
         );
         return { events: [], apiStatus: 'forbidden', apiUrl: url };
       }
@@ -168,7 +171,7 @@ export class NewsForexFactoryClient {
   async fetchNewsEvents(): Promise<ForexFactoryApiFetchResult> {
     const url = this.getNewsCalendarApiUrl();
     try {
-      const response = await this.wwwHttp.get<NewsApiResponse>(url);
+      const response = await this.http.get<NewsApiResponse>(url);
       const events: ForexFactoryNewsEvent[] = response.data.events.map(
         (event) => ({
           ...event,
@@ -188,7 +191,7 @@ export class NewsForexFactoryClient {
         : undefined;
       if (status === 403) {
         this.logger.warn(
-          `Forex Factory calendar API returned 403 — regular news still available via mds-api. URL: ${url}`,
+          `Forex Factory calendar API returned 403. URL: ${url}. ${FOREX_FACTORY_403_HINT}`,
         );
         return { events: [], apiStatus: 'forbidden', apiUrl: url };
       }

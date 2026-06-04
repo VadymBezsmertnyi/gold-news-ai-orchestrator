@@ -10,16 +10,13 @@ export const NEWS_API_URL = NEWS_CALENDAR_API_URL;
 export const NEWS_SOURCE_FOREX_FACTORY_INDICATOR = 'forexfactory:indicator';
 export const NEWS_SOURCE_FOREX_FACTORY_NEWS = 'forexfactory:news';
 
-/** Browser-like headers (XauSync + CORS hints for www / mds-api). */
+/** Legacy minimal headers (XauSync); prefer buildForexFactoryBrowserHeaders() + cookie. */
 export const FOREX_FACTORY_HTTP_HEADERS = {
   Accept: 'application/json, text/plain, */*',
   'Accept-Language': 'en-US,en;q=0.9',
   'User-Agent':
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  Referer: `${FF_BASE_URL}/`,
-  Origin: FF_BASE_URL,
-  'Sec-Fetch-Dest': 'empty',
-  'Sec-Fetch-Mode': 'cors',
+  Referer: FF_BASE_URL,
 } as const;
 
 /** Legacy rows + both FF sub-sources for queries. */
