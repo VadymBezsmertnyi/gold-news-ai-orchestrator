@@ -1,55 +1,144 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+
+// constants
+import { ANALYSIS_BATCH_LIMIT } from '../../constants';
 
 // modules
 import { NewsService } from '../news/news.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { PredictionsService } from '../predictions/predictions.service';
+import { SERVER_LOG_TYPES } from '../server-logs/server-logs.constants';
+import { ServerLogsService } from '../server-logs/server-logs.service';
 
 @Injectable()
-export class SchedulerService {
+export class SchedulerService implements OnModuleInit {
   private readonly logger = new Logger(SchedulerService.name);
+  private startupRan = false;
 
   constructor(
     private readonly newsService: NewsService,
     private readonly orchestratorService: OrchestratorService,
     private readonly predictionsService: PredictionsService,
+    private readonly serverLogs: ServerLogsService,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    if (this.startupRan) return;
+    this.startupRan = true;
+
+    await this.serverLogs.info(
+      SERVER_LOG_TYPES.SCHEDULER,
+      'Scheduler started — running initial background jobs',
+    );
+
+    setTimeout(() => {
+      void this.handleNewsSync();
+      void this.handlePendingNewsAnalysis();
+      void this.handleDuePredictionEvaluation();
+    }, 3000);
+  }
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async handleNewsSync(): Promise<void> {
+    await this.serverLogs.info(
+      SERVER_LOG_TYPES.NEWS_SYNC,
+      'Scheduled news sync started',
+    );
+
     try {
       const result = await this.newsService.syncNews();
+      await this.serverLogs.info(
+        SERVER_LOG_TYPES.NEWS_SYNC,
+        'Scheduled news sync completed',
+        {
+          fetched: result.fetched,
+          created: result.created,
+          skipped: result.skipped,
+          source: result.source,
+        },
+      );
       this.logger.log(
-        `Scheduled news sync: synced=${result.synced} skipped=${result.skipped} source=${result.source}`,
+        `News sync: fetched=${result.fetched} created=${result.created} skipped=${result.skipped}`,
       );
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown sync error';
+      await this.serverLogs.error(
+        SERVER_LOG_TYPES.NEWS_SYNC,
+        `Scheduled news sync failed: ${message}`,
+      );
       this.logger.error('Scheduled news sync failed', error);
     }
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handlePendingNewsAnalysis(): Promise<void> {
+    await this.serverLogs.info(
+      SERVER_LOG_TYPES.NEWS_ANALYSIS,
+      'Pending news analysis started',
+      { limit: ANALYSIS_BATCH_LIMIT },
+    );
+
     try {
-      const result = await this.orchestratorService.analyzePendingNews();
-      if (result.count > 0)
+      const result =
+        await this.orchestratorService.analyzePendingNews(ANALYSIS_BATCH_LIMIT);
+
+      await this.serverLogs.info(
+        SERVER_LOG_TYPES.NEWS_ANALYSIS,
+        'Pending news analysis completed',
+        {
+          processed: result.processed,
+          analyzed: result.analyzed,
+          failed: result.failed,
+          predictionsCreated: result.predictionsCreated,
+          predictionsSkipped: result.predictionsSkipped,
+          newsIds: result.newsIds,
+        },
+      );
+
+      if (result.processed > 0)
         this.logger.log(
-          `Pending news analysis placeholder: count=${result.count} ids=${result.results.map((r) => r.id).join(', ')}`,
+          `News analysis: processed=${result.processed} analyzed=${result.analyzed} failed=${result.failed} predictionsCreated=${result.predictionsCreated}`,
         );
     } catch (error) {
-      this.logger.error('Pending news analysis hook failed', error);
+      const message =
+        error instanceof Error ? error.message : 'Unknown analysis error';
+      await this.serverLogs.error(
+        SERVER_LOG_TYPES.NEWS_ANALYSIS,
+        `Pending news analysis failed: ${message}`,
+      );
+      this.logger.error('Pending news analysis failed', error);
     }
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
   async handleDuePredictionEvaluation(): Promise<void> {
+    await this.serverLogs.info(
+      SERVER_LOG_TYPES.PREDICTION_EVALUATION,
+      'Due prediction evaluation started',
+    );
+
     try {
       const summary = await this.predictionsService.evaluateDuePredictions();
+
+      await this.serverLogs.info(
+        SERVER_LOG_TYPES.PREDICTION_EVALUATION,
+        'Due prediction evaluation completed',
+        { ...summary },
+      );
+
       if (summary.evaluated > 0)
         this.logger.log(
-          `Due prediction evaluation: evaluated=${summary.evaluated} success=${summary.success} failed=${summary.failed}`,
+          `Prediction evaluation: evaluated=${summary.evaluated} success=${summary.success} failed=${summary.failed}`,
         );
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown evaluation error';
+      await this.serverLogs.error(
+        SERVER_LOG_TYPES.PREDICTION_EVALUATION,
+        `Due prediction evaluation failed: ${message}`,
+      );
       this.logger.error('Due prediction evaluation failed', error);
     }
   }

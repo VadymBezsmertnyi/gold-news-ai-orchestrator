@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   PredictionDirection,
+  PredictionSourceType,
   PredictionStatus,
   type Prediction,
   type PredictionResult,
@@ -46,9 +47,22 @@ export class PredictionsService {
       where: { id },
       include: { newsItem: true, result: true },
     });
-    if (!prediction)
-      throw new NotFoundException(`Prediction ${id} not found`);
+    if (!prediction) throw new NotFoundException(`Prediction ${id} not found`);
     return prediction;
+  }
+
+  async hasActiveSingleNewsPrediction(newsItemId: string): Promise<boolean> {
+    const now = new Date();
+    const existing = await this.prisma.prediction.findFirst({
+      where: {
+        newsItemId,
+        sourceType: PredictionSourceType.SINGLE_NEWS,
+        status: PredictionStatus.PENDING,
+        result: { is: null },
+        OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
+      },
+    });
+    return !!existing;
   }
 
   async createMockPrediction(): Promise<Prediction> {
@@ -59,8 +73,10 @@ export class PredictionsService {
       newsItemId = mockNews.id;
     }
 
+    if (await this.hasActiveSingleNewsPrediction(newsItemId))
+      return this.findActiveSingleNewsPrediction(newsItemId);
+
     const price = await this.marketService.getCurrentXauusd();
-    const timeframeMinutes = 60;
     const checkAfter = new Date();
 
     return this.prisma.prediction.create({
@@ -69,21 +85,18 @@ export class PredictionsService {
         direction: PredictionDirection.BUY,
         confidence: 72,
         expectedMovePercent: 0.35,
-        timeframeMinutes,
+        timeframeMinutes: 60,
         reason:
           'Mock prediction for learning pipeline — replace with agent orchestration later.',
         status: PredictionStatus.PENDING,
         priceAtPrediction: price.price,
         checkAfter,
+        sourceType: PredictionSourceType.SINGLE_NEWS,
       },
       include: { newsItem: true },
     });
   }
 
-  /**
-   * Local/manual evaluation for due predictions (no Redis or job queue).
-   * A future BullMQ worker can call evaluatePrediction() per id on a schedule.
-   */
   async evaluateDuePredictions(): Promise<EvaluateDueSummary> {
     const now = new Date();
     const due = await this.prisma.prediction.findMany({
@@ -99,10 +112,6 @@ export class PredictionsService {
     );
   }
 
-  /**
-   * Called on each market price update. Evaluates active predictions once checkAfter is reached.
-   * Early invalidation on price movement can be added when agent rules are defined.
-   */
   async evaluateActivePredictionsByPrice(
     priceAfter: number,
   ): Promise<EvaluateDueSummary> {
@@ -193,12 +202,33 @@ export class PredictionsService {
     return this.prisma.prediction.count({ where: { status } });
   }
 
-  async findRecentForDashboard(limit = 10) {
+  async findRecentForDashboard(limit = 15) {
     return this.prisma.prediction.findMany({
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: { newsItem: true, result: true },
     });
+  }
+
+  private async findActiveSingleNewsPrediction(
+    newsItemId: string,
+  ): Promise<Prediction> {
+    const now = new Date();
+    const prediction = await this.prisma.prediction.findFirst({
+      where: {
+        newsItemId,
+        sourceType: PredictionSourceType.SINGLE_NEWS,
+        status: PredictionStatus.PENDING,
+        result: { is: null },
+        OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
+      },
+      include: { newsItem: true },
+    });
+    if (!prediction)
+      throw new NotFoundException(
+        `No active SINGLE_NEWS prediction for news ${newsItemId}`,
+      );
+    return prediction;
   }
 
   private activePredictionWhere(now: Date): {

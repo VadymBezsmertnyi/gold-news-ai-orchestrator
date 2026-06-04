@@ -34,7 +34,8 @@ export interface IndicatorsApiResponse {
 }
 
 export interface SyncNewsResult {
-  synced: number;
+  fetched: number;
+  created: number;
   skipped: number;
   source: string;
 }

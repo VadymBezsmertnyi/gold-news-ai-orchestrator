@@ -7,7 +7,10 @@ import { NEWS_SOURCE_FOREX_FACTORY } from '../../constants';
 
 // local
 import { NewsForexFactoryClient } from './news-forexfactory.client';
-import type { ForexFactoryNewsEvent, SyncNewsResult } from './news-forexfactory.types';
+import type {
+  ForexFactoryNewsEvent,
+  SyncNewsResult,
+} from './news-forexfactory.types';
 
 @Injectable()
 export class NewsService {
@@ -29,43 +32,67 @@ export class NewsService {
     return item;
   }
 
-  /** Used by scheduler and POST /news/sync */
+  /** Used by scheduler and POST /news/sync — idempotent, no duplicates. */
   async syncNews(): Promise<SyncNewsResult> {
     return this.syncFromForexFactory();
   }
 
   async syncFromForexFactory(): Promise<SyncNewsResult> {
     const events = await this.ffClient.fetchRollingGoldNews();
-    let synced = 0;
+    let created = 0;
     let skipped = 0;
 
     for (const event of events) {
       const mapped = this.mapForexFactoryEvent(event);
-      if (!mapped.externalId) {
-        skipped++;
-        continue;
-      }
+      const externalId = this.resolveExternalId(
+        mapped.source,
+        mapped.title,
+        mapped.publishedAt,
+        event,
+      );
+
       const existing = await this.prisma.newsItem.findUnique({
-        where: { externalId: mapped.externalId },
+        where: { externalId },
       });
       if (existing) {
         skipped++;
         continue;
       }
-      await this.prisma.newsItem.create({ data: mapped });
-      synced++;
+
+      await this.prisma.newsItem.create({
+        data: { ...mapped, externalId },
+      });
+      created++;
     }
 
-    return { synced, skipped, source: NEWS_SOURCE_FOREX_FACTORY };
+    return {
+      fetched: events.length,
+      created,
+      skipped,
+      source: NEWS_SOURCE_FOREX_FACTORY,
+    };
   }
 
   async createMockNews(): Promise<NewsItem> {
     const now = new Date();
+    const title = 'Mock: US CPI beats expectations — gold volatility expected';
+    const externalId = this.resolveExternalId('mock', title, now, {
+      idApi: `mock-${Date.now()}`,
+      title,
+      impact_value: 0,
+      dateline: Math.floor(now.getTime() / 1000),
+    });
+
+    const existing = await this.prisma.newsItem.findUnique({
+      where: { externalId },
+    });
+    if (existing) return existing;
+
     return this.prisma.newsItem.create({
       data: {
-        externalId: `mock-${Date.now()}`,
+        externalId,
         source: 'mock',
-        title: 'Mock: US CPI beats expectations — gold volatility expected',
+        title,
         url: 'https://example.com/mock-gold-news',
         summary:
           'Educational mock headline for dashboard and prediction pipeline testing.',
@@ -111,10 +138,32 @@ export class NewsService {
     });
   }
 
-  private mapForexFactoryEvent(
-    event: ForexFactoryNewsEvent,
-  ): Prisma.NewsItemCreateInput {
-    const externalId = String(event.idApi ?? event.id ?? '');
+  resolveExternalId(
+    source: string,
+    title: string,
+    publishedAt: Date,
+    event?: ForexFactoryNewsEvent,
+  ): string {
+    const rawId = event?.idApi ?? event?.id;
+    if (rawId != null && String(rawId).trim() !== '')
+      return `${source}:${String(rawId).trim()}`;
+
+    const slug = title
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .slice(0, 120);
+    return `${source}:${publishedAt.toISOString()}:${slug}`;
+  }
+
+  private mapForexFactoryEvent(event: ForexFactoryNewsEvent): Omit<
+    Prisma.NewsItemCreateInput,
+    'externalId'
+  > & {
+    publishedAt: Date;
+    source: string;
+    title: string;
+  } {
     const publishedAt = new Date(event.dateline * 1000);
     const summaryParts = [
       event.country ? `country: ${event.country}` : null,
@@ -124,7 +173,6 @@ export class NewsService {
     ].filter(Boolean);
 
     return {
-      externalId: externalId || undefined,
       source: NEWS_SOURCE_FOREX_FACTORY,
       title: event.title,
       url: event.details_url,

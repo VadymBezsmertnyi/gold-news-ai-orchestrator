@@ -1,29 +1,28 @@
 # GoldNews AI Orchestrator
 
-Educational full-stack foundation for XAUUSD / gold news analytics. Background jobs run in-process via `@nestjs/schedule` (no Redis). Claude / Anthropic agents are **not** implemented yet.
+Educational full-stack foundation for XAUUSD / gold news analytics. Runs fully locally with in-process scheduling (no Redis/BullMQ).
 
-## Structure
+## URLs
 
-- `backend/` — NestJS, Prisma, PostgreSQL, in-process scheduler
-- `web/` — Next.js App Router dashboard
+- API: http://localhost:3001
+- Dashboard: http://localhost:3000
 
-## Quick start
+## Setup
 
 ### Backend
 
 ```bash
 cd backend
 cp .env.example .env
-# Edit DATABASE_URL / DIRECT_URL for PostgreSQL (e.g. Supabase)
 npm install
 npm run prisma:generate
 npm run prisma:migrate
 npm run start:dev
 ```
 
-API default: `http://localhost:3001`
+Set `LLM_DEFAULT_PROVIDER=mock` in `.env` for zero-cost local demo (deterministic agent responses).
 
-### Frontend
+### Web
 
 ```bash
 cd web
@@ -32,51 +31,33 @@ npm install
 npm run dev
 ```
 
-Dashboard: `http://localhost:3000`
+Open the dashboard — it auto-refreshes every 10 seconds. No buttons required for the main flow.
 
-## Background scheduler (automatic)
+## Automatic flow (after `npm run start:dev`)
 
-When the API is running:
+1. **~3s after startup** — initial news sync, analysis batch, prediction evaluation.
+2. **Every 10 min** — Forex Factory news sync (idempotent, no duplicates).
+3. **Every 1 min** — analyze up to 2 pending news items (classifier → impact → prediction agents).
+4. **Every 1 min** — evaluate due PENDING predictions (`checkAfter <= now`).
+5. **Dashboard** — polls `GET /orchestrator/dashboard` every 10s (stats, news, predictions, server logs).
 
-| Interval | Job |
-|----------|-----|
-| Every 10 min | Forex Factory news sync (`NewsService.syncNews`) |
-| Every 1 min | Pending news analysis placeholder (logs IDs, no AI) |
-| Every 1 min | Evaluate due predictions (`evaluateDuePredictions`) |
+## Server logs
 
-## Local manual flow
+`GET /server-logs` — latest 100 DB-backed logs from scheduler jobs.
+
+Types: `news_sync`, `news_analysis`, `prediction_evaluation`, `scheduler`
+
+## Manual endpoints (optional)
 
 ```bash
 curl -X POST http://localhost:3001/news/mock
-curl -X POST http://localhost:3001/predictions/mock
 curl -X POST http://localhost:3001/predictions/evaluate-due
+curl -X POST http://localhost:3001/orchestrator/analyze-pending
 ```
 
-Orchestrator placeholders (no AI):
+## Architecture notes
 
-```bash
-curl -X POST http://localhost:3001/orchestrator/analyze-pending-placeholder
-curl http://localhost:3001/orchestrator/global-context-placeholder
-```
-
-Single prediction evaluation anytime:
-
-```bash
-curl -X POST http://localhost:3001/predictions/<id>/evaluate-mock
-```
-
-## New database fields
-
-- **NewsItem**: `analysisStatus`, `analysisSummary`, `category`, `impactLevel`, `goldImpact`, …
-- **Prediction**: `sourceType` (`SINGLE_NEWS` \| `GLOBAL_CONTEXT`), `validFrom`, `expiresAt`, `globalContextId`, …
-- **MarketContextAnalysis**: for future global-context predictions
-
-## Environment
-
-See `backend/.env.example` and `web/.env.example`.
-
-## Future AI wiring
-
-1. Replace `analyzePendingNewsPlaceholder()` with Claude agents → set `NewsItem.analysisStatus` and create `SINGLE_NEWS` predictions.
-2. Replace `getGlobalContextPlaceholder()` → persist `MarketContextAnalysis` and `GLOBAL_CONTEXT` predictions.
-3. Optionally call `MarketService.handlePriceUpdate()` from a live MetaAPI tick stream.
+- **News dedup**: `externalId` = `source:id` or `source:publishedAt:titleSlug`
+- **Predictions**: one active `SINGLE_NEWS` PENDING prediction per news item
+- **LLM**: Mock / OpenAI / Claude via `LlmRouterService.resolveAgentProvider()`
+- **Global context**: placeholder only — `MarketContextAnalysis` model ready for later

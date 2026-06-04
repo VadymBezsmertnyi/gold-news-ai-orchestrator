@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 // common
 import { AppConfigModule } from './common/config/config.module';
 import { PrismaModule } from './common/prisma/prisma.module';
+import { ServerLogsModule } from './modules/server-logs/server-logs.module';
 
 // modules
 import { AgentsModule } from './modules/agents/agents.module';
@@ -19,6 +20,7 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module';
     ScheduleModule.forRoot(),
     AppConfigModule,
     PrismaModule,
+    ServerLogsModule,
     NewsModule,
     MarketModule,
     PredictionsModule,
