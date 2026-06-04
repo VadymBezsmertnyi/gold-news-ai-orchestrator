@@ -685,21 +685,21 @@ function NewsTitleCell({ title }: { title: string }) {
   );
 }
 
-const PREDICTION_COL_WIDTHS = [
-  "w-[24%]",
-  "w-[5%]",
-  "w-[6%]",
-  "w-[5%]",
-  "w-[8%]",
-  "w-[13%]",
-  "w-[8%]",
-  "w-[8%]",
-  "w-[7%]",
-  "w-[7%]",
-  "w-[9%]",
+const PREDICTION_COLUMNS = [
+  { id: "news", width: "w-[24%]" },
+  { id: "impact", width: "w-[5%]" },
+  { id: "direction", width: "w-[6%]" },
+  { id: "confidence", width: "w-[5%]" },
+  { id: "status", width: "w-[8%]" },
+  { id: "eventState", width: "w-[13%]" },
+  { id: "expectedPrice", width: "w-[8%]" },
+  { id: "finalPrice", width: "w-[8%]" },
+  { id: "expectedMove", width: "w-[7%]" },
+  { id: "actualMove", width: "w-[7%]" },
+  { id: "distanceToTarget", width: "w-[9%]" },
 ] as const;
 
-const PREDICTION_COL_COUNT = PREDICTION_COL_WIDTHS.length;
+const PREDICTION_COL_COUNT = PREDICTION_COLUMNS.length;
 
 function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -709,8 +709,8 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
     <div className={TABLE_SHELL}>
       <table className={TABLE_CLASS}>
         <colgroup>
-          {PREDICTION_COL_WIDTHS.map((w) => (
-            <col key={w} className={w} />
+          {PREDICTION_COLUMNS.map((col) => (
+            <col key={col.id} className={col.width} />
           ))}
         </colgroup>
         <thead className="border-b border-zinc-200 bg-zinc-50">
