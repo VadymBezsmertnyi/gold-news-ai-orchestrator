@@ -204,23 +204,32 @@ export class OrchestratorService {
         const checkAfter = new Date(
           now.getTime() + predictionOutput.timeframeMinutes * 60 * 1000,
         );
-        await this.prisma.prediction.create({
-          data: {
+
+        const existingPrediction = await this.prisma.prediction.findFirst({
+          where: {
             newsItemId: updatedNewsItem.id,
-            direction: predictionOutput.direction,
-            confidence: predictionOutput.confidence,
-            expectedMovePercent: predictionOutput.expectedMovePercent,
-            timeframeMinutes: predictionOutput.timeframeMinutes,
-            reason: predictionOutput.reason,
             status: 'PENDING',
-            priceAtPrediction: currentPrice.price,
-            checkAfter,
             sourceType: 'SINGLE_NEWS',
-            validFrom: now,
-            validUntil: checkAfter,
-            expiresAt: checkAfter,
           },
         });
+        if (!existingPrediction)
+          await this.prisma.prediction.create({
+            data: {
+              newsItemId: updatedNewsItem.id,
+              direction: predictionOutput.direction,
+              confidence: predictionOutput.confidence,
+              expectedMovePercent: predictionOutput.expectedMovePercent,
+              timeframeMinutes: predictionOutput.timeframeMinutes,
+              reason: predictionOutput.reason,
+              status: 'PENDING',
+              priceAtPrediction: currentPrice.price,
+              checkAfter,
+              sourceType: 'SINGLE_NEWS',
+              validFrom: now,
+              validUntil: checkAfter,
+              expiresAt: checkAfter,
+            },
+          });
 
         results.push({
           id: updatedNewsItem.id,
@@ -228,7 +237,16 @@ export class OrchestratorService {
           category: updatedNewsItem.category,
           impactLevel: updatedNewsItem.impactLevel,
           goldImpact: updatedNewsItem.goldImpact,
-          prediction: predictionOutput,
+          prediction: existingPrediction
+            ? {
+                direction: existingPrediction.direction,
+                confidence: existingPrediction.confidence,
+                expectedMovePercent: existingPrediction.expectedMovePercent,
+                timeframeMinutes: existingPrediction.timeframeMinutes,
+                reason: existingPrediction.reason,
+              }
+            : predictionOutput,
+          predictionCreated: !existingPrediction,
           priceAtPrediction: currentPrice.price,
         });
       } catch (error) {
