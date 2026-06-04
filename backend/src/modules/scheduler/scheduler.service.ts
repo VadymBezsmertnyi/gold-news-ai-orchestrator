@@ -31,8 +31,7 @@ export class SchedulerService {
   @Cron(CronExpression.EVERY_MINUTE)
   async handlePendingNewsAnalysis(): Promise<void> {
     try {
-      const result =
-        await this.orchestratorService.analyzePendingNewsPlaceholder();
+      const result = await this.orchestratorService.analyzePendingNews();
       if (result.count > 0)
         this.logger.log(
           `Pending news analysis placeholder: count=${result.count} ids=${result.results.map((r) => r.id).join(', ')}`,

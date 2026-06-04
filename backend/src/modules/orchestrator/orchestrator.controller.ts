@@ -12,9 +12,9 @@ export class OrchestratorController {
     return this.orchestratorService.getDashboard();
   }
 
-  @Post('analyze-pending-placeholder')
-  analyzePendingPlaceholder() {
-    return this.orchestratorService.analyzePendingNewsPlaceholder();
+  @Post('analyze-pending')
+  analyzePendingNews() {
+    return this.orchestratorService.analyzePendingNews();
   }
 
   @Get('global-context-placeholder')

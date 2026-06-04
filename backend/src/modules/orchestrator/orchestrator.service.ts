@@ -140,7 +140,7 @@ export class OrchestratorService {
     };
   }
 
-  async analyzePendingNewsPlaceholder(limit = 5) {
+  async analyzePendingNews(limit = 5) {
     const newsItems = await this.prisma.newsItem.findMany({
       where: {
         analysisStatus: 'PENDING',
