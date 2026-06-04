@@ -5,6 +5,7 @@ import { Injectable } from '@nestjs/common';
 import { LlmRouterService } from '../providers/llm-router.service';
 
 // Types
+import { formatHistoricalReasoningImprovementsSection } from '../../learning/prompt-improvement-prompt.format';
 import { LlmProviderType } from '../types/llm.types';
 import {
   PredictionAgentInput,
@@ -16,7 +17,7 @@ export class PredictionAgent {
   constructor(private readonly llmRouter: LlmRouterService) {}
 
   async run(input: PredictionAgentInput): Promise<PredictionAgentOutput> {
-    const promptImprovementsJson = JSON.stringify(
+    const improvementsSection = formatHistoricalReasoningImprovementsSection(
       input.promptImprovements ?? [],
     );
 
@@ -25,8 +26,12 @@ export class PredictionAgent {
       model: process.env.OPENAI_MODEL_FAST || 'gpt-4.1-mini',
       temperature: 0.15,
       maxTokens: 700,
-      system:
+      system: [
         'You are an educational XAUUSD prediction agent. You create structured hypothetical predictions only. This is not financial advice.',
+        improvementsSection,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       prompt: `
 Create an educational prediction for XAUUSD based on this analyzed news.
 
@@ -39,8 +44,7 @@ Context:
   "goldImpact": "${input.goldImpact || ''}",
   "impactReason": "${input.impactReason || ''}",
   "currentPrice": ${input.currentPrice},
-  "publishedAt": "${input.publishedAt.toISOString()}",
-  "promptImprovements": ${promptImprovementsJson}
+  "publishedAt": "${input.publishedAt.toISOString()}"
 }
 
 Rules:
@@ -51,7 +55,7 @@ Rules:
 - confidence must be 1-100.
 - expectedMovePercent must be realistic for the timeframe.
 - timeframeMinutes should be 30, 60, 120, 240, or 1440.
-- promptImprovements are reusable reasoning adjustments for how you decide — NOT current market facts. Apply them to improve decision quality; do not treat them as absolute truth.
+- Apply HISTORICAL REASONING IMPROVEMENTS from the system prompt only when relevant — they are not market facts.
 - This is educational analytics only.
 
 Return JSON:

@@ -86,28 +86,29 @@ model MarketContextAnalysis {
 }
 
 model Prediction {
-  id                  String               @id @default(cuid())
-  newsItemId          String?
-  direction           PredictionDirection
-  confidence          Int
-  expectedMovePercent Float?
-  timeframeMinutes    Int
-  reason              String
-  status              PredictionStatus     @default(PENDING)
-  sourceType          PredictionSourceType @default(SINGLE_NEWS)
-  priceAtPrediction   Float?
-  eventStartAt        DateTime?
-  eventEndAt          DateTime?
-  priceAtEventStart   Float?
-  priceAtEventEnd     Float?
-  checkAfter          DateTime
-  validFrom           DateTime?
-  validUntil          DateTime?
-  expiresAt           DateTime?
-  globalContextId     String?
-  invalidationReason  String?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  id                          String               @id @default(cuid())
+  newsItemId                  String?
+  direction                   PredictionDirection
+  confidence                  Int
+  expectedMovePercent         Float?
+  timeframeMinutes            Int
+  reason                      String
+  status                      PredictionStatus     @default(PENDING)
+  sourceType                  PredictionSourceType @default(SINGLE_NEWS)
+  priceAtPrediction           Float?
+  eventStartAt                DateTime?
+  eventEndAt                  DateTime?
+  priceAtEventStart           Float?
+  priceAtEventEnd             Float?
+  checkAfter                  DateTime
+  validFrom                   DateTime?
+  validUntil                  DateTime?
+  expiresAt                   DateTime?
+  globalContextId             String?
+  invalidationReason          String?
+  appliedPromptImprovementIds Json?
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
 
   newsItem      NewsItem?              @relation(fields: [newsItemId], references: [id], onDelete: Cascade)
   globalContext MarketContextAnalysis? @relation(fields: [globalContextId], references: [id], onDelete: SetNull)
@@ -162,22 +163,31 @@ model PredictionResult {
   prediction Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade)
 }
 
-/// Reusable prompt/reasoning improvements — not temporary market observations.
-model LearningRule {
-  id                 String   @id @default(cuid())
-  problemType        String?
-  rootCause          String?
-  promptImprovement  String?
+/// Reusable prompt/reasoning improvements — never market conclusions.
+model PromptImprovement {
+  id                 String    @id @default(cuid())
+  problemType        String
+  rootCause          String
+  promptImprovement  String
   confidence         Int?
+  sourcePredictionId String?
+  isDeprecated       Boolean   @default(false)
+  occurrences        Int       @default(1)
+  usageCount         Int       @default(0)
+  timesApplied       Int       @default(0)
+  successCount       Int       @default(0)
+  failureCount       Int       @default(0)
+  successRate        Float?
+  lastAppliedAt      DateTime?
+  /// Legacy market-rule fields — do not use in prompts
   title              String?
   description        String?
-  sourcePredictionId String?
-  isActive           Boolean  @default(true)
-  isDeprecated       Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  @@index([isActive, isDeprecated])
+  @@index([isDeprecated, createdAt])
+  @@map("LearningRule")
 }
 
 model ServerLog {

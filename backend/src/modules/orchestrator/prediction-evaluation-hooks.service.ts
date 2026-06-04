@@ -36,6 +36,11 @@ export class PredictionEvaluationHooksService implements PredictionEvaluationHan
     prediction: Prediction & { result: PredictionResult | null },
     result: PredictionResult,
   ): Promise<void> {
+    await this.learningService.recordEvaluationForPrediction(
+      prediction,
+      result.isSuccess,
+    );
+
     if (result.isSuccess) {
       await this.maybeTriggerGlobalContextAfterResult(prediction, result);
       return;
@@ -118,31 +123,35 @@ export class PredictionEvaluationHooksService implements PredictionEvaluationHan
         activePromptImprovements,
       });
 
-      if (
-        !output.shouldCreateImprovement ||
-        output.confidence < this.learningMinConfidence ||
-        !output.promptImprovement?.trim()
-      ) {
+      if (output.confidence < this.learningMinConfidence) {
+        await this.logLearningSkipped('confidence_below_threshold', prediction.id);
+        return;
+      }
+
+      const upsert = await this.learningService.upsertFromFailedPrediction(
+        prediction.id,
+        output,
+      );
+
+      if (!upsert) {
         await this.logLearningSkipped(
-          output.rootCause || 'improvement_not_created',
+          output.rootCause || 'improvement_rejected',
           prediction.id,
         );
         return;
       }
 
-      const created = await this.learningService.createFromFailedPrediction(
-        prediction.id,
-        output,
-      );
-
       await this.serverLogsService.info(
         SERVER_LOG_TYPES.LEARNING_RULE_CREATED,
-        'Prompt improvement created',
+        upsert.mergedDuplicate
+          ? 'Prompt improvement merged (duplicate)'
+          : 'Prompt improvement created',
         {
           predictionId: prediction.id,
-          improvementId: created.id,
-          problemType: output.problemType,
-          confidence: output.confidence,
+          improvementId: upsert.record.id,
+          problemType: upsert.record.problemType,
+          confidence: upsert.record.confidence,
+          mergedDuplicate: upsert.mergedDuplicate,
         },
       );
     } catch (error) {

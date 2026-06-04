@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import { formatHistoricalReasoningImprovementsSection } from '../../learning/prompt-improvement-prompt.format';
 import { LlmRouterService } from '../providers/llm-router.service';
 import { LlmProviderType } from '../types/llm.types';
 import {
@@ -14,6 +15,10 @@ export class GlobalMarketContextAgent {
   async run(
     input: GlobalMarketContextAgentInput,
   ): Promise<GlobalMarketContextAgentOutput> {
+    const improvementsSection = formatHistoricalReasoningImprovementsSection(
+      input.promptImprovements,
+    );
+
     const payload = JSON.stringify(
       {
         currentPrice: input.currentPrice,
@@ -21,7 +26,6 @@ export class GlobalMarketContextAgent {
         upcomingNews: input.upcomingNews,
         activePredictions: input.activePredictions,
         recentResults: input.recentResults,
-        promptImprovements: input.promptImprovements,
       },
       null,
       0,
@@ -32,8 +36,12 @@ export class GlobalMarketContextAgent {
       model: process.env.CLAUDE_MODEL_SMART || 'claude-sonnet-4-6',
       temperature: 0.2,
       maxTokens: 1200,
-      system:
-        'You are an educational global XAUUSD market-context analyst. You synthesize news windows, active predictions, recent outcomes, and learning rules into one holistic bias. This is not financial advice.',
+      system: [
+        'You are an educational global XAUUSD market-context analyst. You synthesize news windows, active predictions, and recent outcomes into one holistic bias. This is not financial advice.',
+        improvementsSection,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
       prompt: `
 Analyze the global gold (XAUUSD) context from the data below.
 
@@ -47,7 +55,7 @@ Rules:
 - timeframeMinutes should be 30, 60, 120, 240, or 1440.
 - activeDrivers: short bullet strings (max 6).
 - riskNotes: short caution bullets (max 5).
-- promptImprovements are reusable reasoning adjustments for synthesis — NOT current market facts or headlines. Use them to improve decision quality cautiously.
+- Apply HISTORICAL REASONING IMPROVEMENTS from the system prompt only when relevant — they are not market facts.
 - Do not overreact to a single headline if broader context is mixed.
 
 Return JSON:

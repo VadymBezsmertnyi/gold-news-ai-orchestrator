@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import { PROMPT_IMPROVEMENT_PROBLEM_TYPES } from '../../learning/prompt-improvement.constants';
 import { LlmRouterService } from '../providers/llm-router.service';
 import { LlmProviderType } from '../types/llm.types';
 import {
@@ -43,43 +44,54 @@ export class LearningAgent {
       0,
     );
 
+    const allowedTypes = PROMPT_IMPROVEMENT_PROBLEM_TYPES.join(', ');
+
     return this.llmRouter.askJson<LearningAgentOutput>({
       provider: LlmProviderType.CLAUDE,
       model: process.env.CLAUDE_MODEL_SMART || 'claude-sonnet-4-6',
       temperature: 0.15,
       maxTokens: 900,
-      system:
-        'You improve AI agent decision-making for educational XAUUSD analytics. You create reusable prompt and reasoning improvements — never temporary market facts.',
+      system: `You are a Prompt Improvement Engine for educational XAUUSD analytics agents.
+You analyze reasoning failures and produce reusable prompt-design fixes.
+You NEVER store market conclusions, geopolitical takes, or event-specific opinions.`,
       prompt: `
-A SINGLE_NEWS prediction FAILED. Analyze why the agent reasoning failed and propose a reusable prompt improvement.
+A SINGLE_NEWS prediction FAILED. Diagnose the reasoning/process failure and propose ONE reusable prompt improvement.
 
 Data:
 ${payload}
 
-CRITICAL:
-- Do NOT store temporary market situations (e.g. "RBA inflation is weak for gold", "ceasefire in X should not trigger SELL").
-- Create reusable reasoning improvements valid across different market environments.
-- promptImprovement must be an instruction the model can follow in future runs (confidence adjustment, signal requirements, categorization rules).
-- problemType: short category (e.g. OVERCONFIDENCE, SINGLE_DRIVER, IMPACT_MISCLASS, TIMEFRAME_MISMATCH).
-- rootCause: why the agent failed (process/reasoning), not a market recap.
-- shouldCreateImprovement: true only if the improvement is generalizable and not already covered by activePromptImprovements.
-- confidence 1-100: strength of the improvement proposal.
+ALLOWED problemType (use exactly one):
+${allowedTypes}
 
-GOOD promptImprovement examples:
-- "Require at least two independent bullish signals before creating BUY prediction."
-- "Reduce confidence when prediction is based on a single LOW impact news item."
-- "Differentiate major central banks from regional central banks when evaluating inflation news."
+OUTPUT MEANING:
+- problemType: category of reasoning failure (from allowed list only)
+- rootCause: why the agent's reasoning process failed (not a market recap)
+- promptImprovement: instruction to add to future agent prompts (how to think, not what the market is)
+- shouldCreateImprovement: false if not generalizable or duplicates activePromptImprovements
+- confidence: 1-100 strength of this improvement proposal
 
-BAD (reject — set shouldCreateImprovement false):
-- "RBA inflation signals have weak gold impact."
-- "Lebanon ceasefire should not trigger SELL."
+GOOD example (SIGNAL_WEIGHTING_GAP):
+rootCause: "Agent counted signals equally instead of weighting by impact."
+promptImprovement: "Rank all available signals by expected market importance before determining directional bias."
+
+GOOD example (CONFIDENCE_GAP):
+rootCause: "Confidence was too high despite conflicting signals."
+promptImprovement: "Reduce confidence when opposing signals are present and cannot be clearly ranked."
+
+FORBIDDEN (set shouldCreateImprovement: false):
+- "Lebanon ceasefire usually does not move gold."
+- "UK construction data is bullish."
+- "RBA inflation comments are weak for gold."
+- "Three bullish signals override geopolitical signals."
+- "SELL should not be used for ceasefire news."
+- Any headline-specific or country-specific market rule
 
 Return JSON:
 {
   "shouldCreateImprovement": false,
-  "problemType": "OVERCONFIDENCE",
-  "rootCause": "short reasoning failure explanation",
-  "promptImprovement": "reusable instruction for future agent prompts",
+  "problemType": "REASONING_GAP",
+  "rootCause": "",
+  "promptImprovement": "",
   "confidence": 0
 }
 `,

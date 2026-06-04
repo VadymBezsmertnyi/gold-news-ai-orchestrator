@@ -376,9 +376,11 @@ export class OrchestratorService {
       newsIds: [],
     };
 
-    const promptImprovements = this.learningService.toPromptImprovementSlices(
-      await this.learningService.findActivePromptImprovements(),
-    );
+    const activeImprovementRows =
+      await this.learningService.findActivePromptImprovements();
+    const promptImprovements =
+      this.learningService.toPromptImprovementSlices(activeImprovementRows);
+    const appliedImprovementIds = promptImprovements.map((p) => p.id);
 
     for (const newsItem of newsItems) {
       summary.processed++;
@@ -471,8 +473,10 @@ export class OrchestratorService {
             validFrom: eventStartAt,
             validUntil: eventEndAt,
             expiresAt: eventEndAt,
+            appliedPromptImprovementIds: appliedImprovementIds,
           },
         });
+        await this.learningService.recordApplications(appliedImprovementIds);
         summary.predictionsCreated++;
       } catch (error) {
         summary.failed++;
@@ -577,6 +581,7 @@ export class OrchestratorService {
       );
       const validUntil = checkAt;
 
+      const globalAppliedIds = input.promptImprovements.map((p) => p.id);
       const prediction = await this.prisma.prediction.create({
         data: {
           newsItemId: anchorNewsId,
@@ -593,8 +598,10 @@ export class OrchestratorService {
           validFrom: new Date(),
           validUntil,
           expiresAt: validUntil,
+          appliedPromptImprovementIds: globalAppliedIds,
         },
       });
+      await this.learningService.recordApplications(globalAppliedIds);
 
       await this.serverLogsService.info(
         SERVER_LOG_TYPES.GLOBAL_CONTEXT_COMPLETED,
