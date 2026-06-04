@@ -56,14 +56,17 @@ export class SchedulerService implements OnModuleInit {
         SERVER_LOG_TYPES.NEWS_SYNC,
         'Scheduled news sync completed',
         {
-          fetched: result.fetched,
+          fetchedRaw: result.fetchedRaw,
+          afterDedup: result.afterDedup,
           created: result.created,
+          updated: result.updated,
           skipped: result.skipped,
           source: result.source,
+          impactBreakdown: { ...result.impactBreakdown },
         },
       );
       this.logger.log(
-        `News sync: fetched=${result.fetched} created=${result.created} skipped=${result.skipped}`,
+        `News sync: raw=${result.fetchedRaw} dedup=${result.afterDedup} +${result.created} ~${result.updated} skip=${result.skipped}`,
       );
     } catch (error) {
       const message =

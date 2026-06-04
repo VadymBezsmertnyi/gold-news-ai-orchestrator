@@ -33,9 +33,60 @@ export interface IndicatorsApiResponse {
   data: IndicatorsApiItem[];
 }
 
+export interface SyncTimeWindow {
+  from: string;
+  to: string;
+  fromSec: number;
+  toSec: number;
+}
+
+export interface ImpactBreakdown {
+  high: number;
+  medium: number;
+  low: number;
+  other: number;
+}
+
+export interface ForexFactoryFetchResult {
+  calendarRaw: number;
+  indicatorsRaw: number;
+  fetchedRaw: number;
+  afterDateWindow: number;
+  afterDedup: number;
+  timeWindow: SyncTimeWindow;
+  impactBreakdown: ImpactBreakdown;
+  events: ForexFactoryNewsEvent[];
+  rawMerged: ForexFactoryNewsEvent[];
+}
+
 export interface SyncNewsResult {
-  fetched: number;
+  fetchedRaw: number;
+  afterDateWindow: number;
+  afterDedup: number;
   created: number;
+  updated: number;
   skipped: number;
   source: string;
+  impactBreakdown: ImpactBreakdown;
+  timeWindow: SyncTimeWindow;
+}
+
+export interface NewsDebugSourceResult {
+  timeWindow: SyncTimeWindow;
+  rawFromApi: {
+    calendar: number;
+    indicators: number;
+    merged: number;
+    afterDateWindow: number;
+    afterDedup: number;
+  };
+  impactBreakdown: ImpactBreakdown;
+  database: {
+    totalForexFactory: number;
+    inTimeWindow: number;
+  };
+  samples: {
+    raw: ForexFactoryNewsEvent[];
+    mapped: Array<Record<string, unknown>>;
+  };
 }

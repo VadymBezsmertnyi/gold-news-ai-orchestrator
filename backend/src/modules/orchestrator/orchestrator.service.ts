@@ -228,7 +228,7 @@ export class OrchestratorService {
       this.newsService.countByAnalysisStatus(NewsAnalysisStatus.ANALYZED),
       this.newsService.countByAnalysisStatus(NewsAnalysisStatus.FAILED),
       this.predictionsService.findRecentForDashboard(15),
-      this.newsService.findRecentForDashboard(10),
+      this.newsService.findRecentForDashboard(100),
       this.learningService.findActivePromptImprovements(),
       this.learningService.findDeprecated(),
       this.getLatestGlobalContext(),

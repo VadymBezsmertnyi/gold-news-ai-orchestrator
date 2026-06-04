@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { NewsAnalysisStatus, type NewsItem, type Prisma } from '@prisma/client';
 
 // common
@@ -9,19 +9,22 @@ import { NEWS_SOURCE_FOREX_FACTORY } from '../../constants';
 import { NewsForexFactoryClient } from './news-forexfactory.client';
 import type {
   ForexFactoryNewsEvent,
+  NewsDebugSourceResult,
   SyncNewsResult,
 } from './news-forexfactory.types';
 
 @Injectable()
 export class NewsService {
+  private readonly logger = new Logger(NewsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly ffClient: NewsForexFactoryClient,
   ) {}
 
-  async findAll(limit = 50): Promise<NewsItem[]> {
+  async findAll(limit = 200): Promise<NewsItem[]> {
     return this.prisma.newsItem.findMany({
-      orderBy: { eventStartAt: 'desc' },
+      orderBy: { eventStartAt: 'asc' },
       take: limit,
     });
   }
@@ -37,41 +40,109 @@ export class NewsService {
   }
 
   async syncFromForexFactory(): Promise<SyncNewsResult> {
-    const events = await this.ffClient.fetchRollingGoldNews();
+    const fetch = await this.ffClient.fetchMergedGoldNews();
+
     let created = 0;
+    let updated = 0;
     let skipped = 0;
 
-    for (const event of events) {
-      const mapped = this.mapForexFactoryEvent(event);
-      const externalId = this.resolveExternalId(
-        mapped.source,
-        mapped.title,
-        mapped.eventStartAt,
-        event,
-      );
-
-      const idApi = mapped.idApi ?? undefined;
-      const existing = await this.prisma.newsItem.findFirst({
-        where: {
-          OR: [{ externalId }, ...(idApi ? [{ idApi }] : [])],
-        },
-      });
-      if (existing) {
+    for (const event of fetch.events) {
+      const idApi = this.ffClient.resolveIdApi(event);
+      if (!idApi) {
         skipped++;
         continue;
       }
 
+      const mapped = this.mapForexFactoryEvent(event);
+      const externalId = `${NEWS_SOURCE_FOREX_FACTORY}:${idApi}`;
+
+      const existing = await this.prisma.newsItem.findFirst({
+        where: {
+          OR: [{ idApi }, { externalId }],
+        },
+      });
+
+      if (existing) {
+        await this.prisma.newsItem.update({
+          where: { id: existing.id },
+          data: {
+            ...mapped,
+            externalId,
+            idApi,
+            analysisStatus: existing.analysisStatus,
+            analysisSummary: existing.analysisSummary,
+            category: existing.category,
+            impactLevel: existing.impactLevel,
+            goldImpact: existing.goldImpact,
+            analyzedAt: existing.analyzedAt,
+            analysisError: existing.analysisError,
+          },
+        });
+        updated++;
+        continue;
+      }
+
       await this.prisma.newsItem.create({
-        data: { ...mapped, externalId },
+        data: { ...mapped, externalId, idApi },
       });
       created++;
     }
 
-    return {
-      fetched: events.length,
+    const result: SyncNewsResult = {
+      fetchedRaw: fetch.fetchedRaw,
+      afterDateWindow: fetch.afterDateWindow,
+      afterDedup: fetch.afterDedup,
       created,
+      updated,
       skipped,
       source: NEWS_SOURCE_FOREX_FACTORY,
+      impactBreakdown: fetch.impactBreakdown,
+      timeWindow: fetch.timeWindow,
+    };
+
+    this.logger.log(
+      `FF sync: raw=${result.fetchedRaw} window=${result.afterDateWindow} dedup=${result.afterDedup} +${result.created} ~${result.updated} skip=${result.skipped} impact=${JSON.stringify(result.impactBreakdown)}`,
+    );
+
+    return result;
+  }
+
+  async getDebugSource(): Promise<NewsDebugSourceResult> {
+    const fetch = await this.ffClient.fetchMergedGoldNews();
+    const range = fetch.timeWindow;
+    const fromDate = new Date(range.fromSec * 1000);
+    const toDate = new Date(range.toSec * 1000);
+
+    const totalForexFactory = await this.prisma.newsItem.count({
+      where: { source: NEWS_SOURCE_FOREX_FACTORY },
+    });
+    const inTimeWindow = await this.prisma.newsItem.count({
+      where: {
+        source: NEWS_SOURCE_FOREX_FACTORY,
+        eventStartAt: { gte: fromDate, lte: toDate },
+      },
+    });
+
+    return {
+      timeWindow: range,
+      rawFromApi: {
+        calendar: fetch.calendarRaw,
+        indicators: fetch.indicatorsRaw,
+        merged: fetch.fetchedRaw,
+        afterDateWindow: fetch.afterDateWindow,
+        afterDedup: fetch.afterDedup,
+      },
+      impactBreakdown: fetch.impactBreakdown,
+      database: {
+        totalForexFactory,
+        inTimeWindow,
+      },
+      samples: {
+        raw: fetch.rawMerged.slice(0, 5),
+        mapped: fetch.events
+          .slice(0, 5)
+          .map((e) => this.mapForexFactoryEvent(e)),
+      },
     };
   }
 
@@ -79,22 +150,18 @@ export class NewsService {
     const now = new Date();
     const title = 'Mock: US CPI beats expectations — gold volatility expected';
     const dateline = Math.floor(now.getTime() / 1000);
-    const externalId = this.resolveExternalId('mock', title, now, {
-      idApi: `mock-${Date.now()}`,
-      title,
-      impact_value: 0,
-      dateline,
-    });
+    const idApi = `mock-${dateline}`;
+    const externalId = `${NEWS_SOURCE_FOREX_FACTORY}:${idApi}`;
 
-    const existing = await this.prisma.newsItem.findUnique({
-      where: { externalId },
+    const existing = await this.prisma.newsItem.findFirst({
+      where: { OR: [{ externalId }, { idApi }] },
     });
     if (existing) return existing;
 
     return this.prisma.newsItem.create({
       data: {
         externalId,
-        idApi: `mock-${dateline}`,
+        idApi,
         dateline,
         eventStartAt: now,
         source: 'mock',
@@ -120,14 +187,22 @@ export class NewsService {
   async findPendingAnalysis(limit = 5): Promise<NewsItem[]> {
     return this.prisma.newsItem.findMany({
       where: { analysisStatus: NewsAnalysisStatus.PENDING },
-      orderBy: { eventStartAt: 'desc' },
+      orderBy: { eventStartAt: 'asc' },
       take: limit,
     });
   }
 
-  async findRecentForDashboard(limit = 10) {
+  async findRecentForDashboard(limit = 100) {
+    const range = this.ffClient.getSyncTimeRange();
     return this.prisma.newsItem.findMany({
-      orderBy: { eventStartAt: 'desc' },
+      where: {
+        source: NEWS_SOURCE_FOREX_FACTORY,
+        eventStartAt: {
+          gte: range.fromDate,
+          lte: range.toDate,
+        },
+      },
+      orderBy: { eventStartAt: 'asc' },
       take: limit,
       select: {
         id: true,
@@ -172,10 +247,7 @@ export class NewsService {
     title: string;
   } {
     const eventStartAt = new Date(event.dateline * 1000);
-    const idApi =
-      event.idApi != null && String(event.idApi).trim() !== ''
-        ? String(event.idApi).trim()
-        : undefined;
+    const idApi = this.ffClient.resolveIdApi(event) ?? undefined;
     const summaryParts = [
       event.country ? `country: ${event.country}` : null,
       (event.impact_name ?? event.impact)

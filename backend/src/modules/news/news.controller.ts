@@ -12,6 +12,11 @@ export class NewsController {
     return this.newsService.findAll();
   }
 
+  @Get('debug/source')
+  debugSource() {
+    return this.newsService.getDebugSource();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.newsService.findById(id);
