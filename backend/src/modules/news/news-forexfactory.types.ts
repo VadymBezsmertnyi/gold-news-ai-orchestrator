@@ -51,7 +51,7 @@ export interface ForexFactoryFetchResult {
   calendarRaw: number;
   indicatorsRaw: number;
   fetchedRaw: number;
-  afterDateWindow: number;
+  afterWindow: number;
   afterDedup: number;
   timeWindow: SyncTimeWindow;
   impactBreakdown: ImpactBreakdown;
@@ -61,30 +61,39 @@ export interface ForexFactoryFetchResult {
 
 export interface SyncNewsResult {
   fetchedRaw: number;
-  afterDateWindow: number;
+  afterWindow: number;
   afterDedup: number;
   created: number;
   updated: number;
   skipped: number;
+  pruned: {
+    newsItems: number;
+    predictions: number;
+    predictionResults: number;
+  };
   source: string;
   impactBreakdown: ImpactBreakdown;
   timeWindow: SyncTimeWindow;
 }
 
 export interface NewsDebugSourceResult {
+  now: string;
+  from: string;
+  to: string;
+  rawCount: number;
+  afterWindowCount: number;
+  afterDedupCount: number;
+  savedCount: number;
+  oldestSavedEventStartAt: string | null;
+  newestSavedEventStartAt: string | null;
   timeWindow: SyncTimeWindow;
+  syncPastHours: number;
+  syncFutureHours: number;
   rawFromApi: {
     calendar: number;
     indicators: number;
-    merged: number;
-    afterDateWindow: number;
-    afterDedup: number;
   };
   impactBreakdown: ImpactBreakdown;
-  database: {
-    totalForexFactory: number;
-    inTimeWindow: number;
-  };
   samples: {
     raw: ForexFactoryNewsEvent[];
     mapped: Array<Record<string, unknown>>;

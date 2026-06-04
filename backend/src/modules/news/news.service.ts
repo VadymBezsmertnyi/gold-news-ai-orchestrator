@@ -12,6 +12,10 @@ import type {
   NewsDebugSourceResult,
   SyncNewsResult,
 } from './news-forexfactory.types';
+import {
+  getNewsSyncFutureHours,
+  getNewsSyncPastHours,
+} from './news-sync-window';
 
 @Injectable()
 export class NewsService {
@@ -88,55 +92,129 @@ export class NewsService {
       created++;
     }
 
+    const pruned = await this.pruneNewsOutsideSyncWindow();
+
     const result: SyncNewsResult = {
       fetchedRaw: fetch.fetchedRaw,
-      afterDateWindow: fetch.afterDateWindow,
+      afterWindow: fetch.afterWindow,
       afterDedup: fetch.afterDedup,
       created,
       updated,
       skipped,
+      pruned,
       source: NEWS_SOURCE_FOREX_FACTORY,
       impactBreakdown: fetch.impactBreakdown,
       timeWindow: fetch.timeWindow,
     };
 
     this.logger.log(
-      `FF sync: raw=${result.fetchedRaw} window=${result.afterDateWindow} dedup=${result.afterDedup} +${result.created} ~${result.updated} skip=${result.skipped} impact=${JSON.stringify(result.impactBreakdown)}`,
+      `FF sync: window ${result.timeWindow.from} → ${result.timeWindow.to} raw=${result.fetchedRaw} afterWindow=${result.afterWindow} dedup=${result.afterDedup} +${result.created} ~${result.updated} skip=${result.skipped} pruned=${JSON.stringify(result.pruned)} impact=${JSON.stringify(result.impactBreakdown)}`,
     );
 
     return result;
   }
 
+  /**
+   * Remove ForexFactory news (and linked predictions) outside the rolling sync window.
+   * For manual cleanup see backend/scripts/prune-news-outside-sync-window.sql
+   */
+  async pruneNewsOutsideSyncWindow(): Promise<{
+    newsItems: number;
+    predictions: number;
+    predictionResults: number;
+  }> {
+    const range = this.ffClient.getSyncTimeRange();
+    const outsideWhere = {
+      source: NEWS_SOURCE_FOREX_FACTORY,
+      OR: [
+        { eventStartAt: { lt: range.fromDate } },
+        { eventStartAt: { gt: range.toDate } },
+      ],
+    };
+
+    const staleNews = await this.prisma.newsItem.findMany({
+      where: outsideWhere,
+      select: { id: true },
+    });
+    const newsIds = staleNews.map((n) => n.id);
+    if (newsIds.length === 0) {
+      return { newsItems: 0, predictions: 0, predictionResults: 0 };
+    }
+
+    const stalePredictions = await this.prisma.prediction.findMany({
+      where: { newsItemId: { in: newsIds } },
+      select: { id: true },
+    });
+    const predictionIds = stalePredictions.map((p) => p.id);
+
+    const predictionResults =
+      predictionIds.length > 0
+        ? await this.prisma.predictionResult.deleteMany({
+            where: { predictionId: { in: predictionIds } },
+          })
+        : { count: 0 };
+
+    const predictions =
+      predictionIds.length > 0
+        ? await this.prisma.prediction.deleteMany({
+            where: { id: { in: predictionIds } },
+          })
+        : { count: 0 };
+
+    const newsItems = await this.prisma.newsItem.deleteMany({
+      where: { id: { in: newsIds } },
+    });
+
+    if (newsItems.count > 0) {
+      this.logger.log(
+        `Pruned outside sync window: news=${newsItems.count} predictions=${predictions.count} results=${predictionResults.count}`,
+      );
+    }
+
+    return {
+      newsItems: newsItems.count,
+      predictions: predictions.count,
+      predictionResults: predictionResults.count,
+    };
+  }
+
   async getDebugSource(): Promise<NewsDebugSourceResult> {
-    const fetch = await this.ffClient.fetchMergedGoldNews();
+    const now = new Date();
+    const fetch = await this.ffClient.fetchMergedGoldNews(now);
     const range = fetch.timeWindow;
     const fromDate = new Date(range.fromSec * 1000);
     const toDate = new Date(range.toSec * 1000);
 
-    const totalForexFactory = await this.prisma.newsItem.count({
-      where: { source: NEWS_SOURCE_FOREX_FACTORY },
-    });
-    const inTimeWindow = await this.prisma.newsItem.count({
+    const saved = await this.prisma.newsItem.findMany({
       where: {
         source: NEWS_SOURCE_FOREX_FACTORY,
         eventStartAt: { gte: fromDate, lte: toDate },
       },
+      select: { eventStartAt: true },
+      orderBy: { eventStartAt: 'asc' },
     });
 
+    const oldest = saved[0]?.eventStartAt ?? null;
+    const newest = saved[saved.length - 1]?.eventStartAt ?? null;
+
     return {
+      now: now.toISOString(),
+      from: range.from,
+      to: range.to,
+      rawCount: fetch.fetchedRaw,
+      afterWindowCount: fetch.afterWindow,
+      afterDedupCount: fetch.afterDedup,
+      savedCount: saved.length,
+      oldestSavedEventStartAt: oldest?.toISOString() ?? null,
+      newestSavedEventStartAt: newest?.toISOString() ?? null,
       timeWindow: range,
+      syncPastHours: getNewsSyncPastHours(),
+      syncFutureHours: getNewsSyncFutureHours(),
       rawFromApi: {
         calendar: fetch.calendarRaw,
         indicators: fetch.indicatorsRaw,
-        merged: fetch.fetchedRaw,
-        afterDateWindow: fetch.afterDateWindow,
-        afterDedup: fetch.afterDedup,
       },
       impactBreakdown: fetch.impactBreakdown,
-      database: {
-        totalForexFactory,
-        inTimeWindow,
-      },
       samples: {
         raw: fetch.rawMerged.slice(0, 5),
         mapped: fetch.events

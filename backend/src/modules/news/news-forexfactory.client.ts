@@ -10,12 +10,13 @@ import type {
   NewsApiResponse,
   SyncTimeWindow,
 } from './news-forexfactory.types';
+import {
+  getNewsSyncFutureHours,
+  getNewsSyncPastHours,
+} from './news-sync-window';
 
 const FF_BASE_URL = 'https://www.forexfactory.com';
 const NEWS_API_URL = `${FF_BASE_URL}/calendar/upcoming/instrument/GoldUSD?limit=100`;
-
-/** Align with XauSync: calendar day with ±5h padding (mobile "today" view). */
-const SYNC_DAY_PADDING_HOURS = 5;
 
 @Injectable()
 export class NewsForexFactoryClient {
@@ -31,29 +32,26 @@ export class NewsForexFactoryClient {
   });
 
   /**
-   * XauSync reference: `getTodayTimeRangeSec(true)` — full local day ±5h.
+   * Rolling window on eventStartAt (ForexFactory dateline): now − past … now + future.
    */
   getSyncTimeRange(now = new Date()): SyncTimeWindow & {
     fromDate: Date;
     toDate: Date;
   } {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 1);
-    start.setHours(start.getHours() - SYNC_DAY_PADDING_HOURS);
-    end.setHours(end.getHours() + SYNC_DAY_PADDING_HOURS);
-
-    const fromSec = Math.floor(start.getTime() / 1000);
-    const toSec = Math.floor(end.getTime() / 1000) - 1;
+    const pastMs = getNewsSyncPastHours() * 60 * 60 * 1000;
+    const futureMs = getNewsSyncFutureHours() * 60 * 60 * 1000;
+    const fromDate = new Date(now.getTime() - pastMs);
+    const toDate = new Date(now.getTime() + futureMs);
+    const fromSec = Math.floor(fromDate.getTime() / 1000);
+    const toSec = Math.floor(toDate.getTime() / 1000);
 
     return {
-      fromDate: start,
-      toDate: end,
+      fromDate,
+      toDate,
       fromSec,
       toSec,
-      from: start.toISOString(),
-      to: end.toISOString(),
+      from: fromDate.toISOString(),
+      to: toDate.toISOString(),
     };
   }
 
@@ -172,10 +170,10 @@ export class NewsForexFactoryClient {
   }
 
   /**
-   * XauSync: merge calendar upcoming + indicators API, filter to today's window (not 6h rolling).
+   * Merge calendar upcoming + indicators API; keep only events in the rolling sync window.
    */
-  async fetchMergedGoldNews(): Promise<ForexFactoryFetchResult> {
-    const range = this.getSyncTimeRange();
+  async fetchMergedGoldNews(now = new Date()): Promise<ForexFactoryFetchResult> {
+    const range = this.getSyncTimeRange(now);
     const [calendar, indicators] = await Promise.all([
       this.fetchCalendarEvents(),
       this.fetchIndicatorEvents(range.fromDate, range.toDate),
@@ -196,7 +194,7 @@ export class NewsForexFactoryClient {
       calendarRaw,
       indicatorsRaw,
       fetchedRaw,
-      afterDateWindow: inWindow.length,
+      afterWindow: inWindow.length,
       afterDedup: events.length,
       timeWindow: {
         from: range.from,
