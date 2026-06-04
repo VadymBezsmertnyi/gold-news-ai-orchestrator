@@ -12,14 +12,19 @@ export class PredictionsController {
     return this.predictionsService.findAll();
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.predictionsService.findById(id);
-  }
-
   @Post('mock')
   createMock() {
     return this.predictionsService.createMockPrediction();
+  }
+
+  @Post('evaluate-due')
+  evaluateDue() {
+    return this.predictionsService.evaluateDuePredictions();
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.predictionsService.findById(id);
   }
 
   @Post(':id/evaluate-mock')

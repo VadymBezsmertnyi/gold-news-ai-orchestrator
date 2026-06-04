@@ -83,7 +83,7 @@ export class OrchestratorService {
       })),
       learningRules,
       orchestratorNote:
-        'Claude orchestrator is not connected yet. Use mock endpoints to seed and evaluate data.',
+        'Claude orchestrator is not connected yet. Seed with mock endpoints, then POST /predictions/evaluate-due for local evaluation.',
     };
   }
 

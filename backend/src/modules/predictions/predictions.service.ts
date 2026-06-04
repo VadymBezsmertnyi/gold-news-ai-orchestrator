@@ -3,6 +3,7 @@ import {
   PredictionDirection,
   PredictionStatus,
   type Prediction,
+  type PredictionResult,
 } from '@prisma/client';
 
 // common
@@ -11,6 +12,18 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 // modules
 import { MarketService } from '../market/market.service';
 import { NewsService } from '../news/news.service';
+
+export interface EvaluateDueSummary {
+  evaluated: number;
+  success: number;
+  failed: number;
+}
+
+export interface EvaluatePredictionOutcome {
+  prediction: Awaited<ReturnType<PredictionsService['findById']>>;
+  result: PredictionResult | null;
+  alreadyEvaluated: boolean;
+}
 
 @Injectable()
 export class PredictionsService {
@@ -48,7 +61,7 @@ export class PredictionsService {
 
     const price = await this.marketService.getCurrentXauusd();
     const timeframeMinutes = 60;
-    const checkAfter = new Date(Date.now() + timeframeMinutes * 60 * 1000);
+    const checkAfter = new Date();
 
     return this.prisma.prediction.create({
       data: {
@@ -67,32 +80,72 @@ export class PredictionsService {
     });
   }
 
-  async evaluateMock(predictionId: string) {
+  /**
+   * Local/manual evaluation for due predictions (no Redis or job queue).
+   * A future BullMQ worker can call evaluatePrediction() per id on a schedule.
+   */
+  async evaluateDuePredictions(): Promise<EvaluateDueSummary> {
+    const due = await this.prisma.prediction.findMany({
+      where: {
+        status: PredictionStatus.PENDING,
+        checkAfter: { lte: new Date() },
+        result: { is: null },
+      },
+      orderBy: { checkAfter: 'asc' },
+    });
+
+    const summary: EvaluateDueSummary = {
+      evaluated: 0,
+      success: 0,
+      failed: 0,
+    };
+
+    for (const prediction of due) {
+      const outcome = await this.evaluatePrediction(prediction.id);
+      if (outcome.alreadyEvaluated || !outcome.result) continue;
+
+      summary.evaluated++;
+      if (outcome.result.isSuccess) summary.success++;
+      else summary.failed++;
+    }
+
+    return summary;
+  }
+
+  async evaluatePrediction(
+    predictionId: string,
+    priceAfter?: number,
+  ): Promise<EvaluatePredictionOutcome> {
     const prediction = await this.findById(predictionId);
     if (prediction.result)
-      return { prediction, result: prediction.result, alreadyEvaluated: true };
+      return {
+        prediction,
+        result: prediction.result,
+        alreadyEvaluated: true,
+      };
 
-    const priceBefore =
-      prediction.priceAtPrediction ??
-      (await this.marketService.getCurrentXauusd()).price;
-    const current = await this.marketService.getCurrentXauusd();
-    const priceAfter = current.price;
+    let priceBefore = prediction.priceAtPrediction;
+    if (priceBefore == null) {
+      const snapshot = await this.marketService.captureSnapshot();
+      priceBefore = snapshot.price;
+      await this.prisma.prediction.update({
+        where: { id: prediction.id },
+        data: { priceAtPrediction: priceBefore },
+      });
+    }
+
+    const resolvedPriceAfter =
+      priceAfter ?? (await this.marketService.getCurrentXauusd()).price;
     const actualMovePercent =
       priceBefore === 0
         ? 0
-        : ((priceAfter - priceBefore) / priceBefore) * 100;
-
-    const expected = prediction.expectedMovePercent ?? 0;
-    const direction = prediction.direction;
-    let isSuccess = false;
-
-    if (direction === PredictionDirection.NEUTRAL)
-      isSuccess = Math.abs(actualMovePercent) < 0.1;
-    else if (direction === PredictionDirection.BUY)
-      isSuccess = actualMovePercent >= expected * 0.5;
-    else if (direction === PredictionDirection.SELL)
-      isSuccess = actualMovePercent <= -Math.abs(expected) * 0.5;
-
+        : ((resolvedPriceAfter - priceBefore) / priceBefore) * 100;
+    const isSuccess = this.isPredictionSuccessful(
+      prediction.direction,
+      priceBefore,
+      resolvedPriceAfter,
+      actualMovePercent,
+    );
     const status = isSuccess
       ? PredictionStatus.SUCCESS
       : PredictionStatus.FAILED;
@@ -102,10 +155,16 @@ export class PredictionsService {
         data: {
           predictionId: prediction.id,
           priceBefore,
-          priceAfter,
+          priceAfter: resolvedPriceAfter,
           actualMovePercent,
           isSuccess,
-          explanation: `Mock evaluation: move ${actualMovePercent.toFixed(3)}% vs expected ${expected}% (${direction}).`,
+          explanation: this.buildEvaluationExplanation(
+            prediction.direction,
+            priceBefore,
+            resolvedPriceAfter,
+            actualMovePercent,
+            isSuccess,
+          ),
           evaluatedAt: new Date(),
         },
       });
@@ -120,6 +179,10 @@ export class PredictionsService {
     return { prediction: updated, result, alreadyEvaluated: false };
   }
 
+  async evaluateMock(predictionId: string): Promise<EvaluatePredictionOutcome> {
+    return this.evaluatePrediction(predictionId);
+  }
+
   async countByStatus(status: PredictionStatus): Promise<number> {
     return this.prisma.prediction.count({ where: { status } });
   }
@@ -130,5 +193,29 @@ export class PredictionsService {
       take: limit,
       include: { newsItem: true, result: true },
     });
+  }
+
+  private isPredictionSuccessful(
+    direction: PredictionDirection,
+    priceBefore: number,
+    priceAfter: number,
+    actualMovePercent: number,
+  ): boolean {
+    if (direction === PredictionDirection.NEUTRAL)
+      return Math.abs(actualMovePercent) <= 0.1;
+    if (direction === PredictionDirection.BUY) return priceAfter > priceBefore;
+    if (direction === PredictionDirection.SELL) return priceAfter < priceBefore;
+    return false;
+  }
+
+  private buildEvaluationExplanation(
+    direction: PredictionDirection,
+    priceBefore: number,
+    priceAfter: number,
+    actualMovePercent: number,
+    isSuccess: boolean,
+  ): string {
+    const outcome = isSuccess ? 'SUCCESS' : 'FAILED';
+    return `${outcome}: ${direction} — ${priceBefore.toFixed(2)} → ${priceAfter.toFixed(2)} (${actualMovePercent.toFixed(3)}% move).`;
   }
 }
