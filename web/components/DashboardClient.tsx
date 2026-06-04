@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 // lib
 import { fetchDashboard } from "@/lib/api";
 import {
+  formatBaselineStartDelta,
   formatCheckAfterUk,
   formatDateTimeUk,
   formatPercent,
@@ -15,6 +16,7 @@ import {
   sortPredictionsByCheckAfter,
 } from "@/lib/dashboard-format";
 import {
+  BASELINE_START_DELTA_TOOLTIP,
   connectionBadgeLabel,
   LOG_HEADERS,
   NEWS_HEADERS,
@@ -40,15 +42,21 @@ import type {
 } from "@/lib/types";
 
 const REFRESH_MS = 10_000;
-const PAGE_MAX = "max-w-[1600px]";
+const PAGE_SHELL = "mx-auto w-[calc(100vw-32px)] max-w-[1900px]";
+const TABLE_SCROLL =
+  "overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300";
+const PREDICTIONS_TABLE_MIN = "min-w-[1800px] w-full border-collapse text-left text-xs";
+const NEWS_TABLE_MIN = "min-w-[1100px] w-full border-collapse text-left text-xs";
+const TH = "whitespace-nowrap px-2 py-1.5 font-medium";
+const TD = "whitespace-nowrap px-2 py-1.5 align-middle";
 
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-zinc-200/90 bg-white px-3 py-2 shadow-sm">
-      <p className="truncate text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+    <div className="rounded-md border border-zinc-200/90 bg-white px-2 py-1.5 shadow-sm">
+      <p className="truncate text-[9px] font-medium uppercase tracking-wide text-zinc-500">
         {label}
       </p>
-      <p className="text-lg font-semibold leading-tight text-amber-950">
+      <p className="text-base font-semibold leading-tight tabular-nums text-amber-950">
         {value}
       </p>
     </div>
@@ -61,8 +69,8 @@ function SourceTypeBadge({ sourceType }: { sourceType: string }) {
     <span
       className={
         isGlobal
-          ? "inline-block rounded border border-violet-200 bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800"
-          : "inline-block rounded border border-sky-200 bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800"
+          ? "inline-block rounded border border-violet-300 bg-violet-100 px-1 py-px text-[10px] font-semibold leading-tight text-violet-900"
+          : "inline-block rounded border border-sky-300 bg-sky-100 px-1 py-px text-[10px] font-semibold leading-tight text-sky-900"
       }
     >
       {predictionSourceLabel(sourceType)}
@@ -78,7 +86,7 @@ function DirectionBadge({ direction }: { direction: string }) {
   };
   return (
     <span
-      className={`inline-block rounded border px-1.5 py-0.5 text-xs font-semibold ${styles[direction] ?? "bg-zinc-100"}`}
+      className={`inline-block rounded border px-1 py-px text-[10px] font-semibold leading-tight ${styles[direction] ?? "bg-zinc-100"}`}
     >
       {direction}
     </span>
@@ -100,7 +108,7 @@ function StatusBadge({
   };
   return (
     <span
-      className={`inline-block rounded border px-1.5 py-0.5 text-xs font-medium ${styles[tone]}`}
+      className={`inline-block rounded border px-1 py-px text-[10px] font-medium leading-tight ${styles[tone]}`}
     >
       {label}
     </span>
@@ -177,7 +185,7 @@ function DashboardHeader({
   return (
     <header className="sticky top-0 z-20 border-b border-amber-200/70 bg-white/95 backdrop-blur-sm">
       <div
-        className={`mx-auto flex flex-col gap-3 px-4 py-3 lg:flex-row lg:items-start lg:justify-between ${PAGE_MAX}`}
+        className={`${PAGE_SHELL} flex flex-col gap-2 px-2 py-2 lg:flex-row lg:items-start lg:justify-between`}
       >
         <div className="min-w-0 flex-1">
           <h1 className="text-lg font-bold tracking-tight text-amber-950">
@@ -200,7 +208,7 @@ function DashboardHeader({
       </div>
 
       <div
-        className={`mx-auto grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-4 lg:grid-cols-8 ${PAGE_MAX}`}
+        className={`${PAGE_SHELL} grid grid-cols-2 gap-1.5 px-2 pb-2 sm:grid-cols-4 xl:grid-cols-8`}
       >
         <StatCard
           label={STATS_LABELS.totalNews}
@@ -247,6 +255,51 @@ function SectionTitle({ children }: { children: ReactNode }) {
   );
 }
 
+function predictionRowBg(row: DashboardPredictionRow): string {
+  if (row.sourceType === "GLOBAL_CONTEXT") return "bg-violet-50/35";
+  if (row.missingEventStartPrice) return "bg-amber-50/55";
+  if (row.result === "SUCCESS" || row.status === "SUCCESS")
+    return "bg-emerald-50/45";
+  if (row.result === "FAILED" || row.status === "FAILED")
+    return "bg-red-50/40";
+  if (row.status === "PENDING" && row.isOverdue) return "bg-amber-50/40";
+  return "bg-white";
+}
+
+function predictionRowClasses(row: DashboardPredictionRow): string {
+  const bg = predictionRowBg(row);
+  const hover =
+    row.sourceType === "GLOBAL_CONTEXT"
+      ? "hover:bg-violet-50/55"
+      : "hover:bg-zinc-50/80";
+  const border =
+    row.sourceType === "GLOBAL_CONTEXT"
+      ? "border-l-4 border-l-violet-400"
+      : "";
+  return `group ${bg} ${hover} ${border}`.trim();
+}
+
+function stickyNewsCell(rowBg: string, isHeader = false): string {
+  const bg = isHeader ? "bg-zinc-50" : rowBg;
+  return `sticky left-0 z-20 min-w-[17.5rem] max-w-[20rem] ${bg} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.07)]`;
+}
+
+function stickyDirectionCell(rowBg: string, isHeader = false): string {
+  const bg = isHeader ? "bg-zinc-50" : rowBg;
+  return `sticky left-[17.5rem] z-10 min-w-[4.5rem] ${bg} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]`;
+}
+
+function NewsTitleCell({ title }: { title: string }) {
+  return (
+    <span
+      className="line-clamp-3 text-[11px] font-medium leading-snug text-zinc-800"
+      title={title}
+    >
+      {title}
+    </span>
+  );
+}
+
 function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
   if (rows.length === 0)
     return (
@@ -255,135 +308,144 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
       </p>
     );
 
+  const showPreview = (row: DashboardPredictionRow) =>
+    row.status === "PENDING" &&
+    !row.result &&
+    !row.missingEventStartPrice &&
+    row.isPreview &&
+    !!row.previewOutcome;
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-      <table className="min-w-full text-left text-xs">
-        <thead className="border-b border-zinc-200 bg-zinc-50 text-[10px] uppercase text-zinc-500">
+    <div className={TABLE_SCROLL}>
+      <table className={PREDICTIONS_TABLE_MIN}>
+        <thead className="border-b border-zinc-200 bg-zinc-50 text-[10px] uppercase tracking-wide text-zinc-500">
           <tr>
-            <th className="px-2 py-1.5 font-medium">
+            <th className={`${TH} ${stickyNewsCell("bg-zinc-50", true)}`}>
               {PREDICTION_HEADERS.news}
             </th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.source}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.direction}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.confidence}</th>
-            <th className="px-2 py-1.5">
-              {PREDICTION_HEADERS.pricePrediction}
+            <th className={TH}>{PREDICTION_HEADERS.source}</th>
+            <th className={`${TH} ${stickyDirectionCell("bg-zinc-50", true)}`}>
+              {PREDICTION_HEADERS.direction}
             </th>
-            <th className="px-2 py-1.5">
-              {PREDICTION_HEADERS.priceEventStart}
-            </th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.baselineSource}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.baselineTime}</th>
-            <th className="px-2 py-1.5">
+            <th className={TH}>{PREDICTION_HEADERS.confidence}</th>
+            <th className={TH}>{PREDICTION_HEADERS.status}</th>
+            <th className={TH}>{PREDICTION_HEADERS.result}</th>
+            <th className={TH}>{PREDICTION_HEADERS.pricePrediction}</th>
+            <th className={TH}>{PREDICTION_HEADERS.priceEventStart}</th>
+            <th className={TH}>{PREDICTION_HEADERS.baselineSource}</th>
+            <th className={TH}>{PREDICTION_HEADERS.current}</th>
+            <th className={TH}>{PREDICTION_HEADERS.actualMove}</th>
+            <th className={TH}>{PREDICTION_HEADERS.expectedMove}</th>
+            <th className={TH}>{PREDICTION_HEADERS.accuracy}</th>
+            <th className={TH}>{PREDICTION_HEADERS.directionOk}</th>
+            <th className={TH}>{PREDICTION_HEADERS.preview}</th>
+            <th className={TH}>{PREDICTION_HEADERS.eventStart}</th>
+            <th className={TH}>{PREDICTION_HEADERS.eventEnd}</th>
+            <th
+              className={TH}
+              title={BASELINE_START_DELTA_TOOLTIP}
+            >
               {PREDICTION_HEADERS.baselineTimeDiff}
             </th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.current}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.actualMove}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.expectedMove}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.accuracy}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.directionOk}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.eventStart}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.eventEnd}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.status}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.preview}</th>
-            <th className="px-2 py-1.5">{PREDICTION_HEADERS.result}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100">
-          {rows.map((row) => (
-            <tr key={row.id} className="hover:bg-amber-50/60">
-              <td className="max-w-[14rem] px-2 py-1.5 font-medium text-zinc-800">
-                {row.newsTitle}
-              </td>
-              <td className="px-2 py-1.5">
-                <SourceTypeBadge sourceType={row.sourceType} />
-              </td>
-              <td className="px-2 py-1.5">
-                <DirectionBadge direction={row.direction} />
-              </td>
-              <td className="px-2 py-1.5 tabular-nums">{row.confidence}%</td>
-              <td className="px-2 py-1.5 tabular-nums">
-                {formatPrice(row.priceAtPrediction)}
-              </td>
-              <td className="px-2 py-1.5 tabular-nums font-medium text-violet-900">
-                {row.missingEventStartPrice ? (
-                  <StatusBadge label="Немає ціни старту" tone="pending" />
-                ) : (
-                  formatPrice(row.priceAtEventStart)
-                )}
-              </td>
-              <td className="px-2 py-1.5 text-zinc-600">
-                {row.missingEventStartPrice
-                  ? translateBaselineSource("missing")
-                  : translateBaselineSource(row.baselineSource)}
-              </td>
-              <td className="whitespace-nowrap px-2 py-1.5 text-zinc-600">
-                {row.baselinePriceTime
-                  ? formatDateTimeUk(row.baselinePriceTime)
-                  : "—"}
-              </td>
-              <td className="px-2 py-1.5 tabular-nums text-zinc-600">
-                {row.baselineTimeDiffSeconds != null
-                  ? row.baselineTimeDiffSeconds
-                  : "—"}
-              </td>
-              <td className="px-2 py-1.5 tabular-nums font-medium text-emerald-800">
-                {formatPrice(row.currentLivePrice)}
-              </td>
-              <td className="px-2 py-1.5 tabular-nums">
-                {formatPercent(row.actualMovePercent)}
-              </td>
-              <td className="px-2 py-1.5 tabular-nums">
-                {formatPercent(row.expectedMovePercent)}
-              </td>
-              <td className="px-2 py-1.5 tabular-nums">
-                {row.finalScore != null
-                  ? `${row.finalScore.toFixed(0)}%`
-                  : row.moveAccuracyPercent != null
-                    ? `${row.moveAccuracyPercent.toFixed(0)}%`
+          {rows.map((row) => {
+            const rowBg = predictionRowBg(row);
+            return (
+              <tr key={row.id} className={predictionRowClasses(row)}>
+                <td className={`${TD} ${stickyNewsCell(rowBg)}`}>
+                  <NewsTitleCell title={row.newsTitle} />
+                </td>
+                <td className={TD}>
+                  <SourceTypeBadge sourceType={row.sourceType} />
+                </td>
+                <td className={`${TD} ${stickyDirectionCell(rowBg)}`}>
+                  <DirectionBadge direction={row.direction} />
+                </td>
+                <td className={`${TD} tabular-nums`}>{row.confidence}%</td>
+                <td className={TD}>
+                  <StatusBadge
+                    label={translatePredictionStatus(
+                      row.status,
+                      row.isOverdue,
+                    )}
+                    tone={predictionStatusTone(row.status, row.isOverdue)}
+                  />
+                </td>
+                <td className={TD}>
+                  {row.result ? (
+                    <StatusBadge
+                      label={translateResult(row.result)}
+                      tone={row.result === "SUCCESS" ? "ok" : "fail"}
+                    />
+                  ) : (
+                    <span className="text-zinc-400">—</span>
+                  )}
+                </td>
+                <td className={`${TD} tabular-nums text-zinc-700`}>
+                  {formatPrice(row.priceAtPrediction)}
+                </td>
+                <td className={`${TD} tabular-nums font-medium text-violet-900`}>
+                  {row.missingEventStartPrice ? (
+                    <StatusBadge label="Немає старту" tone="pending" />
+                  ) : (
+                    formatPrice(row.priceAtEventStart)
+                  )}
+                </td>
+                <td className={`${TD} text-zinc-600`}>
+                  {row.missingEventStartPrice
+                    ? translateBaselineSource("missing")
+                    : translateBaselineSource(row.baselineSource)}
+                </td>
+                <td className={`${TD} tabular-nums font-medium text-emerald-800`}>
+                  {formatPrice(row.currentLivePrice)}
+                </td>
+                <td className={`${TD} tabular-nums`}>
+                  {formatPercent(row.actualMovePercent)}
+                </td>
+                <td className={`${TD} tabular-nums`}>
+                  {formatPercent(row.expectedMovePercent)}
+                </td>
+                <td className={`${TD} tabular-nums`}>
+                  {row.finalScore != null
+                    ? `${row.finalScore.toFixed(0)}%`
+                    : row.moveAccuracyPercent != null
+                      ? `${row.moveAccuracyPercent.toFixed(0)}%`
+                      : "—"}
+                </td>
+                <td className={`${TD} tabular-nums`}>
+                  {translateDirectionCorrect(row.directionCorrect)}
+                </td>
+                <td className={TD}>
+                  {showPreview(row) ? (
+                    <StatusBadge
+                      label={translateExpectedResult(row.previewOutcome)}
+                      tone={row.previewOutcome === "SUCCESS" ? "ok" : "fail"}
+                    />
+                  ) : (
+                    <span className="text-zinc-400">—</span>
+                  )}
+                </td>
+                <td className={`${TD} text-zinc-600`}>
+                  {row.eventStartAt
+                    ? formatDateTimeUk(row.eventStartAt)
                     : "—"}
-              </td>
-              <td className="px-2 py-1.5 tabular-nums">
-                {translateDirectionCorrect(row.directionCorrect)}
-              </td>
-              <td className="whitespace-nowrap px-2 py-1.5 text-zinc-600">
-                {row.eventStartAt ? formatDateTimeUk(row.eventStartAt) : "—"}
-              </td>
-              <td className="whitespace-nowrap px-2 py-1.5 text-zinc-600">
-                {row.eventEndAt
-                  ? formatDateTimeUk(row.eventEndAt)
-                  : formatCheckAfterUk(row.checkAfter)}
-              </td>
-              <td className="px-2 py-1.5">
-                <StatusBadge
-                  label={translatePredictionStatus(row.status, row.isOverdue)}
-                  tone={predictionStatusTone(row.status, row.isOverdue)}
-                />
-              </td>
-              <td className="px-2 py-1.5">
-                {row.missingEventStartPrice ? (
-                  <span className="text-zinc-400">—</span>
-                ) : row.isPreview && row.previewOutcome ? (
-                  <StatusBadge
-                    label={`${translateExpectedResult(row.previewOutcome)} *`}
-                    tone={row.previewOutcome === "SUCCESS" ? "ok" : "fail"}
-                  />
-                ) : (
-                  <span className="text-zinc-400">—</span>
-                )}
-              </td>
-              <td className="px-2 py-1.5">
-                {row.result ? (
-                  <StatusBadge
-                    label={translateResult(row.result)}
-                    tone={row.result === "SUCCESS" ? "ok" : "fail"}
-                  />
-                ) : (
-                  "—"
-                )}
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td className={`${TD} text-zinc-600`}>
+                  {row.eventEndAt
+                    ? formatDateTimeUk(row.eventEndAt)
+                    : formatCheckAfterUk(row.checkAfter)}
+                </td>
+                <td
+                  className={`${TD} tabular-nums text-zinc-600`}
+                  title={BASELINE_START_DELTA_TOOLTIP}
+                >
+                  {formatBaselineStartDelta(row.baselineTimeDiffSeconds)}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -399,42 +461,42 @@ function RecentNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
     );
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
-      <table className="min-w-full text-left text-xs">
-        <thead className="border-b border-zinc-200 bg-zinc-50 text-[10px] uppercase text-zinc-500">
+    <div className={TABLE_SCROLL}>
+      <table className={NEWS_TABLE_MIN}>
+        <thead className="border-b border-zinc-200 bg-zinc-50 text-[10px] uppercase tracking-wide text-zinc-500">
           <tr>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.title}</th>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.source}</th>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.published}</th>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.status}</th>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.category}</th>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.impact}</th>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.gold}</th>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.summary}</th>
+            <th
+              className={`${TH} sticky left-0 z-20 min-w-[17.5rem] max-w-[20rem] bg-zinc-50 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]`}
+            >
+              {NEWS_HEADERS.title}
+            </th>
+            <th className={TH}>{NEWS_HEADERS.source}</th>
+            <th className={TH}>{NEWS_HEADERS.published}</th>
+            <th className={TH}>{NEWS_HEADERS.status}</th>
+            <th className={TH}>{NEWS_HEADERS.category}</th>
+            <th className={TH}>{NEWS_HEADERS.impact}</th>
+            <th className={TH}>{NEWS_HEADERS.gold}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100">
           {rows.map((row) => (
-            <tr key={row.id} className="align-top hover:bg-amber-50/50">
-              <td className="max-w-[12rem] px-2 py-1.5 font-medium">
-                {row.title}
+            <tr key={row.id} className="bg-white hover:bg-zinc-50/80">
+              <td className="sticky left-0 z-10 min-w-[17.5rem] max-w-[20rem] bg-white px-2 py-1.5 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)] group-hover:bg-inherit">
+                <NewsTitleCell title={row.title} />
               </td>
-              <td className="px-2 py-1.5">{row.source}</td>
-              <td className="whitespace-nowrap px-2 py-1.5 text-zinc-600">
+              <td className={TD}>{row.source}</td>
+              <td className={`${TD} text-zinc-600`}>
                 {formatDateTimeUk(row.publishedAt)}
               </td>
-              <td className="px-2 py-1.5">
+              <td className={TD}>
                 <StatusBadge
                   label={translateAnalysisStatus(row.analysisStatus)}
                   tone={analysisStatusTone(row.analysisStatus)}
                 />
               </td>
-              <td className="px-2 py-1.5">{row.category ?? "—"}</td>
-              <td className="px-2 py-1.5">{row.impactLevel ?? "—"}</td>
-              <td className="px-2 py-1.5">{row.goldImpact ?? "—"}</td>
-              <td className="max-w-md px-2 py-1.5 text-zinc-600">
-                {row.analysisSummaryPreview ?? "—"}
-              </td>
+              <td className={TD}>{row.category ?? "—"}</td>
+              <td className={TD}>{row.impactLevel ?? "—"}</td>
+              <td className={TD}>{row.goldImpact ?? "—"}</td>
             </tr>
           ))}
         </tbody>
@@ -445,25 +507,27 @@ function RecentNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
 
 function PendingNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-amber-200/80 bg-amber-50/40">
-      <table className="min-w-full text-left text-xs">
+    <div className="overflow-x-auto rounded-lg border border-amber-200/80 bg-amber-50/40 [scrollbar-width:thin]">
+      <table className="min-w-[720px] w-full border-collapse text-left text-xs">
         <thead className="border-b border-amber-200/60 text-[10px] uppercase text-amber-900/70">
           <tr>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.title}</th>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.source}</th>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.published}</th>
-            <th className="px-2 py-1.5">{NEWS_HEADERS.status}</th>
+            <th className="sticky left-0 z-20 min-w-[17.5rem] bg-amber-50/90 px-2 py-1.5 font-medium shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)]">
+              {NEWS_HEADERS.title}
+            </th>
+            <th className={TH}>{NEWS_HEADERS.source}</th>
+            <th className={TH}>{NEWS_HEADERS.published}</th>
+            <th className={TH}>{NEWS_HEADERS.status}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-amber-100/80">
           {rows.map((row) => (
             <tr key={row.id}>
-              <td className="max-w-md px-2 py-1.5 font-medium">{row.title}</td>
-              <td className="px-2 py-1.5">{row.source}</td>
-              <td className="whitespace-nowrap px-2 py-1.5">
-                {formatDateTimeUk(row.publishedAt)}
+              <td className="sticky left-0 z-10 min-w-[17.5rem] max-w-[20rem] bg-amber-50/40 px-2 py-1.5 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.05)]">
+                <NewsTitleCell title={row.title} />
               </td>
-              <td className="px-2 py-1.5">
+              <td className={TD}>{row.source}</td>
+              <td className={TD}>{formatDateTimeUk(row.publishedAt)}</td>
+              <td className={TD}>
                 <StatusBadge label="Очікує" tone="pending" />
               </td>
             </tr>
@@ -619,7 +683,7 @@ function ServerLogsPanel({ logs }: { logs: DashboardServerLogRow[] }) {
     );
 
   return (
-    <div className="max-h-52 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950">
+    <div className="max-h-[260px] overflow-auto rounded-lg border border-zinc-700 bg-zinc-950 [scrollbar-width:thin]">
       <table className="min-w-full text-left text-xs text-zinc-200">
         <thead className="sticky top-0 bg-zinc-900 text-[10px] uppercase text-zinc-500">
           <tr>
@@ -704,7 +768,7 @@ export default function DashboardClient() {
         <DashboardHeader dashboard={dashboard} lastUpdated={lastUpdated} />
       ) : null}
 
-      <main className={`mx-auto space-y-4 px-4 py-4 ${PAGE_MAX}`}>
+      <main className={`${PAGE_SHELL} space-y-4 py-4`}>
         {loading && !dashboard ? (
           <p className="text-xs text-zinc-600">Завантаження…</p>
         ) : null}

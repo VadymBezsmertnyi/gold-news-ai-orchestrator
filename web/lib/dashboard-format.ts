@@ -30,6 +30,16 @@ export function formatPrice(value: number | null): string {
   return value.toFixed(2);
 }
 
+/** Human label for baseline vs event-start time skew. */
+export function formatBaselineStartDelta(seconds: number | null): string {
+  if (seconds == null) return '—';
+  const abs = Math.abs(Math.round(seconds));
+  if (abs <= 30) return 'точно';
+  if (abs <= 60) return `±${abs}с`;
+  const minutes = Math.round(abs / 60);
+  return `±${minutes}хв`;
+}
+
 /** `13:52:13 · через 52 хв` or `прострочено` when past due. */
 export function formatCheckAfterUk(checkAfter: string, now = new Date()): string {
   const target = new Date(checkAfter);

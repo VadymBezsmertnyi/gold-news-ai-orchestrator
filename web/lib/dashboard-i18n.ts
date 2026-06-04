@@ -23,25 +23,28 @@ export const SECTION_TITLES = {
 
 export const PREDICTION_HEADERS = {
   news: "Новина",
-  source: "Джерело",
+  source: "Тип",
   direction: "Напрям",
   confidence: "Впевненість",
-  pricePrediction: "Ціна прогнозу",
-  priceEventStart: "Ціна старту новини",
-  baselineSource: "Джерело стартової ціни",
-  baselineTime: "Час стартової ціни",
-  baselineTimeDiff: "Різниця часу (с)",
-  current: "Поточна/фінальна",
-  actualMove: "Факт Δ %",
-  expectedMove: "Очікуваний рух %",
-  accuracy: "Оцінка %",
-  directionOk: "Напрям вгадано",
-  eventStart: "Старт новини",
-  eventEnd: "Кінець перевірки",
   status: "Статус",
-  preview: "Попередня оцінка",
-  result: "Фінальний результат",
+  result: "Результат",
+  pricePrediction: "Ціна прогнозу",
+  priceEventStart: "Ціна старту",
+  baselineSource: "Джерело старту",
+  current: "Фінальна",
+  actualMove: "Факт Δ%",
+  expectedMove: "Очік. рух",
+  accuracy: "Оцінка",
+  directionOk: "Вгадано",
+  preview: "Попередньо",
+  eventStart: "Старт",
+  eventEnd: "Кінець",
+  baselineTimeDiff: "Δ старту",
 } as const;
+
+/** Tooltip for Δ старту column header and cells. */
+export const BASELINE_START_DELTA_TOOLTIP =
+  "Різниця між часом новини та знайденою стартовою ціною";
 
 export function translateDirectionCorrect(value: boolean | null): string {
   if (value == null) return "—";
@@ -157,16 +160,16 @@ export function predictionSourceLabel(sourceType: string): string {
 }
 
 const BASELINE_SOURCE_UA: Record<string, string> = {
-  live_at_event_start: "live на старті",
-  metaapi_history: "MetaAPI history",
-  snapshot_before: "локальний snapshot",
-  snapshot_after: "локальний snapshot",
-  priceAtEventStart: "збережена стартова",
-  priceAtPrediction: "ціна прогнозу",
+  live_at_event_start: "Live",
+  metaapi_history: "MetaAPI",
+  snapshot_before: "Snapshot",
+  snapshot_after: "Snapshot",
+  priceAtEventStart: "Збережена",
+  priceAtPrediction: "Ціна прогнозу",
   missing: "немає",
 };
 
 export function translateBaselineSource(source: string | null): string {
-  if (!source) return "—";
+  if (!source) return "немає";
   return BASELINE_SOURCE_UA[source] ?? source;
 }
