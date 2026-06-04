@@ -15,6 +15,7 @@ import { LearningService } from '../learning/learning.service';
 import { NewsService } from '../news/news.service';
 import { PredictionsService } from '../predictions/predictions.service';
 import { MarketService } from '../market/market.service';
+import { MetaApiLivePriceService } from '../market/metaapi-live-price.service';
 import { ServerLogsService } from '../server-logs/server-logs.service';
 
 // agents
@@ -31,10 +32,28 @@ export interface DashboardPredictionRow {
   timeframeMinutes: number;
   status: string;
   priceAtPrediction: number | null;
+  currentLivePrice: number | null;
   checkAfter: Date;
   priceBefore: number | null;
   priceAfter: number | null;
   result: string | null;
+}
+
+export interface DashboardMarketPrice {
+  symbol: string;
+  price: number;
+  bid: number;
+  ask: number;
+  source: 'metaapi' | 'mock';
+  connected: boolean;
+  updatedAt: Date;
+}
+
+export interface DashboardMetaApiStatus {
+  connected: boolean;
+  synchronized: boolean;
+  hasLivePrice: boolean;
+  symbol: string;
 }
 
 export interface DashboardNewsRow {
@@ -47,6 +66,7 @@ export interface DashboardNewsRow {
   impactLevel: string | null;
   goldImpact: string | null;
   analysisSummary: string | null;
+  analysisSummaryPreview?: string | null;
   analyzedAt: Date | null;
 }
 
@@ -60,11 +80,14 @@ export interface DashboardServerLogRow {
 }
 
 export interface DashboardResponse {
+  marketPrice: DashboardMarketPrice;
+  metaApiStatus: DashboardMetaApiStatus;
   stats: {
     totalNews: number;
     pendingPredictions: number;
     successfulPredictions: number;
     failedPredictions: number;
+    activePredictions: number;
     pendingAnalysisNewsCount: number;
     analyzedNewsCount: number;
     failedAnalysisNewsCount: number;
@@ -104,14 +127,21 @@ export class OrchestratorService {
     private readonly singleNewsImpactAgent: SingleNewsImpactAgent,
     private readonly predictionAgent: PredictionAgent,
     private readonly marketService: MarketService,
+    private readonly metaApiLive: MetaApiLivePriceService,
   ) {}
 
   async getDashboard(): Promise<DashboardResponse> {
+    const marketPrice = await this.marketService.getCurrentXauusd();
+    const metaApiStatus = this.metaApiLive.getStatus();
+    const livePrice =
+      marketPrice.source === 'metaapi' ? marketPrice.price : null;
+
     const [
       totalNews,
       pendingPredictions,
       successfulPredictions,
       failedPredictions,
+      activePredictions,
       pendingAnalysisNewsCount,
       analyzedNewsCount,
       failedAnalysisNewsCount,
@@ -126,6 +156,7 @@ export class OrchestratorService {
       this.predictionsService.countByStatus(PredictionStatus.PENDING),
       this.predictionsService.countByStatus(PredictionStatus.SUCCESS),
       this.predictionsService.countByStatus(PredictionStatus.FAILED),
+      this.predictionsService.countActivePredictions(),
       this.newsService.countByAnalysisStatus(NewsAnalysisStatus.PENDING),
       this.newsService.countByAnalysisStatus(NewsAnalysisStatus.ANALYZED),
       this.newsService.countByAnalysisStatus(NewsAnalysisStatus.FAILED),
@@ -133,16 +164,19 @@ export class OrchestratorService {
       this.newsService.findRecentForDashboard(10),
       this.learningService.findAll(),
       this.getGlobalContextPlaceholder(),
-      this.serverLogsService.findLatest(50),
+      this.serverLogsService.findLatest(80),
       this.serverLogsService.getLastCompletedAt('news_sync'),
     ]);
 
     return {
+      marketPrice,
+      metaApiStatus,
       stats: {
         totalNews,
         pendingPredictions,
         successfulPredictions,
         failedPredictions,
+        activePredictions,
         pendingAnalysisNewsCount,
         analyzedNewsCount,
         failedAnalysisNewsCount,
@@ -156,12 +190,19 @@ export class OrchestratorService {
         timeframeMinutes: p.timeframeMinutes,
         status: p.status,
         priceAtPrediction: p.priceAtPrediction,
+        currentLivePrice: p.result?.priceAfter ?? livePrice,
         checkAfter: p.checkAfter,
         priceBefore: p.result?.priceBefore ?? p.priceAtPrediction,
         priceAfter: p.result?.priceAfter ?? null,
         result: p.result ? (p.result.isSuccess ? 'SUCCESS' : 'FAILED') : null,
       })),
-      recentNews: recentNews as DashboardNewsRow[],
+      recentNews: (recentNews as DashboardNewsRow[]).map((row) => ({
+        ...row,
+        analysisSummaryPreview: row.analysisSummary
+          ? row.analysisSummary.slice(0, 120) +
+            (row.analysisSummary.length > 120 ? '…' : '')
+          : null,
+      })),
       recentServerLogs: recentServerLogs.map((log) => ({
         id: log.id,
         type: log.type,
@@ -174,7 +215,7 @@ export class OrchestratorService {
       globalContext,
       learningRules,
       orchestratorNote:
-        'Automatic local pipeline: news sync (10m), AI analysis (1m, batch limit), prediction evaluation (1m). Dashboard refreshes every 10s.',
+        'Live MetaAPI streaming + automatic news/analysis/evaluation. Dashboard refreshes every 10s.',
     };
   }
 

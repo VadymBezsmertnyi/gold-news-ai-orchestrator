@@ -202,6 +202,13 @@ export class PredictionsService {
     return this.prisma.prediction.count({ where: { status } });
   }
 
+  async countActivePredictions(): Promise<number> {
+    const now = new Date();
+    return this.prisma.prediction.count({
+      where: this.activePredictionWhere(now),
+    });
+  }
+
   async findRecentForDashboard(limit = 15) {
     return this.prisma.prediction.findMany({
       orderBy: { createdAt: 'desc' },

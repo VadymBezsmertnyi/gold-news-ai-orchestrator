@@ -22,6 +22,8 @@ npm run start:dev
 
 Set `LLM_DEFAULT_PROVIDER=mock` in `.env` for zero-cost local demo (deterministic agent responses).
 
+Set `METAAPI_TOKEN` and `METAAPI_ACCOUNT_ID` for live XAUUSD streaming (optional `METAAPI_SYMBOL=XAUUSD`).
+
 ### Web
 
 ```bash

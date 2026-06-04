@@ -10,7 +10,10 @@ import { PredictionsService } from '../predictions/predictions.service';
 import type { EvaluateDueSummary } from '../predictions/predictions.service';
 
 // local
-import { MetaApiPriceService, type CurrentGoldPrice } from './metaapi-price.service';
+import {
+  MetaApiLivePriceService,
+  type MarketPriceView,
+} from './metaapi-live-price.service';
 
 export interface PriceUpdateResult {
   snapshot: MarketPriceSnapshot;
@@ -21,13 +24,13 @@ export interface PriceUpdateResult {
 export class MarketService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly metaApiPrice: MetaApiPriceService,
+    private readonly metaApiLive: MetaApiLivePriceService,
     @Inject(forwardRef(() => PredictionsService))
     private readonly predictionsService: PredictionsService,
   ) {}
 
-  async getCurrentXauusd(): Promise<CurrentGoldPrice> {
-    return this.metaApiPrice.getCurrentGoldPrice();
+  async getCurrentXauusd(): Promise<MarketPriceView> {
+    return this.metaApiLive.resolveMarketPrice();
   }
 
   async captureSnapshot(): Promise<MarketPriceSnapshot> {
@@ -37,10 +40,12 @@ export class MarketService {
         symbol: XAUUSD_SYMBOL,
         price: current.price,
         source: current.source,
-        capturedAt: current.capturedAt,
-        rawPayload: (current.rawPayload ?? undefined) as
-          | Prisma.InputJsonValue
-          | undefined,
+        capturedAt: current.updatedAt,
+        rawPayload: {
+          bid: current.bid,
+          ask: current.ask,
+          connected: current.connected,
+        },
       },
     });
   }
@@ -53,7 +58,7 @@ export class MarketService {
   }
 
   /**
-   * Persists a price tick and evaluates active predictions that are due (checkAfter <= now).
+   * Persists a throttled price tick and evaluates active predictions (deterministic only).
    */
   async handlePriceUpdate(
     price: number,

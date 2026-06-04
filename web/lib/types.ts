@@ -1,8 +1,26 @@
+export interface DashboardMarketPrice {
+  symbol: string;
+  price: number;
+  bid: number;
+  ask: number;
+  source: 'metaapi' | 'mock';
+  connected: boolean;
+  updatedAt: string;
+}
+
+export interface DashboardMetaApiStatus {
+  connected: boolean;
+  synchronized: boolean;
+  hasLivePrice: boolean;
+  symbol: string;
+}
+
 export interface DashboardStats {
   totalNews: number;
   pendingPredictions: number;
   successfulPredictions: number;
   failedPredictions: number;
+  activePredictions: number;
   pendingAnalysisNewsCount: number;
   analyzedNewsCount: number;
   failedAnalysisNewsCount: number;
@@ -17,6 +35,7 @@ export interface DashboardPredictionRow {
   timeframeMinutes: number;
   status: string;
   priceAtPrediction: number | null;
+  currentLivePrice: number | null;
   checkAfter: string;
   priceBefore: number | null;
   priceAfter: number | null;
@@ -33,6 +52,7 @@ export interface DashboardNewsRow {
   impactLevel: string | null;
   goldImpact: string | null;
   analysisSummary: string | null;
+  analysisSummaryPreview?: string | null;
   analyzedAt: string | null;
 }
 
@@ -72,6 +92,8 @@ export interface LearningRule {
 }
 
 export interface DashboardResponse {
+  marketPrice: DashboardMarketPrice;
+  metaApiStatus: DashboardMetaApiStatus;
   stats: DashboardStats;
   recentPredictions: DashboardPredictionRow[];
   recentNews: DashboardNewsRow[];
