@@ -10,7 +10,9 @@ import {
   NEWS_SOURCE_FOREX_FACTORY_NEWS,
 } from './news-forexfactory.constants';
 import {
-  buildForexFactoryBrowserHeaders,
+  buildCalendarApiHeaders,
+  buildCalendarBrowserHeaders,
+  buildMdsApiHeaders,
   FOREX_FACTORY_403_HINT,
   hasForexFactoryCookie,
 } from './news-forexfactory.http-config';
@@ -39,10 +41,13 @@ export interface ForexFactoryApiFetchResult {
 export class NewsForexFactoryClient {
   private readonly logger = new Logger(NewsForexFactoryClient.name);
 
-  /** Shared client — Chrome-like headers + optional FOREX_FACTORY_COOKIE (Cloudflare). */
-  private readonly http: AxiosInstance = axios.create({
+  private readonly mdsHttp: AxiosInstance = axios.create({
     timeout: 15_000,
-    headers: buildForexFactoryBrowserHeaders(),
+    maxRedirects: 5,
+  });
+
+  private readonly calendarHttp: AxiosInstance = axios.create({
+    timeout: 15_000,
     maxRedirects: 5,
   });
 
@@ -118,7 +123,9 @@ export class NewsForexFactoryClient {
   ): Promise<ForexFactoryApiFetchResult> {
     const url = this.getMdsApiUrl(fromDate, toDate);
     try {
-      const response = await this.http.get<IndicatorsApiResponse>(url);
+      const response = await this.mdsHttp.get<IndicatorsApiResponse>(url, {
+        headers: buildMdsApiHeaders(),
+      });
       const events: ForexFactoryNewsEvent[] = response.data.data.map((item) => {
         const type = this.classifyMdsEventType(item.url);
         return {
@@ -166,34 +173,46 @@ export class NewsForexFactoryClient {
    */
   async fetchNewsEvents(): Promise<ForexFactoryApiFetchResult> {
     const url = this.getNewsCalendarApiUrl();
-    try {
-      const response = await this.http.get<NewsApiResponse>(url);
-      const events: ForexFactoryNewsEvent[] = response.data.events.map(
-        (event) => ({
-          ...event,
-          idApi:
-            event.idApi != null
-              ? String(event.idApi)
-              : event.id != null
-                ? String(event.id)
-                : undefined,
-          forexFactoryType: 'NEWS' as const,
-        }),
-      );
-      return { events, apiStatus: 'ok', apiUrl: url };
-    } catch (error: unknown) {
-      const status = axios.isAxiosError(error)
-        ? error.response?.status
-        : undefined;
-      if (status === 403) {
-        this.logger.warn(
-          `Forex Factory calendar API returned 403. URL: ${url}. ${FOREX_FACTORY_403_HINT}`,
+    const headerSets = [
+      { name: 'json', headers: buildCalendarApiHeaders() },
+      { name: 'browser', headers: buildCalendarBrowserHeaders() },
+    ];
+
+    for (const { name, headers } of headerSets) {
+      try {
+        const response = await this.calendarHttp.get<NewsApiResponse>(url, {
+          headers,
+        });
+        const events: ForexFactoryNewsEvent[] = response.data.events.map(
+          (event) => ({
+            ...event,
+            idApi:
+              event.idApi != null
+                ? String(event.idApi)
+                : event.id != null
+                  ? String(event.id)
+                  : undefined,
+            forexFactoryType: 'NEWS' as const,
+          }),
         );
-        return { events: [], apiStatus: 'forbidden', apiUrl: url };
+        this.logger.log(
+          `calendar/upcoming: ${events.length} events (headers=${name})`,
+        );
+        return { events, apiStatus: 'ok', apiUrl: url };
+      } catch (error: unknown) {
+        const status = axios.isAxiosError(error)
+          ? error.response?.status
+          : undefined;
+        if (status === 403) continue;
+        this.logger.error('Error fetching calendar news events', error);
+        return { events: [], apiStatus: 'error', apiUrl: url };
       }
-      this.logger.error('Error fetching calendar news events', error);
-      return { events: [], apiStatus: 'error', apiUrl: url };
     }
+
+    this.logger.debug(
+      `calendar/upcoming unavailable (403) — breaking news comes from mds-api. ${FOREX_FACTORY_403_HINT}`,
+    );
+    return { events: [], apiStatus: 'forbidden', apiUrl: url };
   }
 
   filterByTimeWindow(
