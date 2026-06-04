@@ -1,6 +1,7 @@
 import {
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   Optional,
 } from '@nestjs/common';
@@ -23,10 +24,24 @@ import {
   type PredictionEvaluationHandler,
 } from '../orchestrator/orchestrator.tokens';
 
+export interface EvaluateDueSkipped {
+  id: string;
+  reason: string;
+}
+
+export interface EvaluateDueError {
+  id: string;
+  error: string;
+}
+
 export interface EvaluateDueSummary {
   evaluated: number;
   success: number;
   failed: number;
+  dueCandidatesCount: number;
+  evaluatedIds: string[];
+  skipped: EvaluateDueSkipped[];
+  errors: EvaluateDueError[];
 }
 
 export interface EvaluatePredictionOutcome {
@@ -37,6 +52,8 @@ export interface EvaluatePredictionOutcome {
 
 @Injectable()
 export class PredictionsService {
+  private readonly logger = new Logger(PredictionsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly newsService: NewsService,
@@ -112,16 +129,60 @@ export class PredictionsService {
   async evaluateDuePredictions(): Promise<EvaluateDueSummary> {
     const now = new Date();
     const due = await this.prisma.prediction.findMany({
-      where: {
-        ...this.activePredictionWhere(now),
-        checkAfter: { lte: now },
-      },
+      where: this.duePredictionWhere(now),
       orderBy: { checkAfter: 'asc' },
     });
 
-    return this.evaluatePredictionBatch(due, (id) =>
-      this.evaluatePrediction(id),
+    const summary: EvaluateDueSummary = {
+      evaluated: 0,
+      success: 0,
+      failed: 0,
+      dueCandidatesCount: due.length,
+      evaluatedIds: [],
+      skipped: [],
+      errors: [],
+    };
+
+    for (const prediction of due) {
+      try {
+        const outcome = await this.evaluatePrediction(prediction.id);
+
+        if (outcome.alreadyEvaluated) {
+          summary.skipped.push({
+            id: prediction.id,
+            reason: 'already_evaluated',
+          });
+          continue;
+        }
+
+        if (!outcome.result) {
+          summary.skipped.push({
+            id: prediction.id,
+            reason: 'no_result_created',
+          });
+          continue;
+        }
+
+        summary.evaluated++;
+        summary.evaluatedIds.push(prediction.id);
+        if (outcome.result.isSuccess) summary.success++;
+        else summary.failed++;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Unknown evaluation error';
+        summary.errors.push({ id: prediction.id, error: message });
+        this.logger.error(
+          `Due prediction evaluation failed for ${prediction.id}: ${message}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+
+    this.logger.log(
+      `Due prediction evaluation: dueCandidatesCount=${summary.dueCandidatesCount} evaluated=${summary.evaluated} success=${summary.success} failed=${summary.failed} skipped=${summary.skipped.length} errors=${summary.errors.length}`,
     );
+
+    return summary;
   }
 
   async evaluateActivePredictionsByPrice(
@@ -228,6 +289,23 @@ export class PredictionsService {
     });
   }
 
+  previewEvaluationOutcome(
+    direction: PredictionDirection,
+    priceBefore: number,
+    priceAfter: number,
+  ): 'SUCCESS' | 'FAILED' {
+    const actualMovePercent =
+      priceBefore === 0 ? 0 : ((priceAfter - priceBefore) / priceBefore) * 100;
+    return this.isPredictionSuccessful(
+      direction,
+      priceBefore,
+      priceAfter,
+      actualMovePercent,
+    )
+      ? 'SUCCESS'
+      : 'FAILED';
+  }
+
   async findRecentForDashboard(limit = 15) {
     return this.prisma.prediction.findMany({
       orderBy: { createdAt: 'desc' },
@@ -257,6 +335,19 @@ export class PredictionsService {
     return prediction;
   }
 
+  /** Overdue PENDING predictions ready for scheduled evaluation (no expiry window). */
+  private duePredictionWhere(now: Date): {
+    status: PredictionStatus;
+    result: { is: null };
+    checkAfter: { lte: Date };
+  } {
+    return {
+      status: PredictionStatus.PENDING,
+      result: { is: null },
+      checkAfter: { lte: now },
+    };
+  }
+
   private activePredictionWhere(now: Date): {
     status: PredictionStatus;
     result: { is: null };
@@ -283,15 +374,39 @@ export class PredictionsService {
       evaluated: 0,
       success: 0,
       failed: 0,
+      dueCandidatesCount: predictions.length,
+      evaluatedIds: [],
+      skipped: [],
+      errors: [],
     };
 
     for (const prediction of predictions) {
-      const outcome = await evaluate(prediction.id);
-      if (outcome.alreadyEvaluated || !outcome.result) continue;
+      try {
+        const outcome = await evaluate(prediction.id);
+        if (outcome.alreadyEvaluated) {
+          summary.skipped.push({
+            id: prediction.id,
+            reason: 'already_evaluated',
+          });
+          continue;
+        }
+        if (!outcome.result) {
+          summary.skipped.push({
+            id: prediction.id,
+            reason: 'no_result_created',
+          });
+          continue;
+        }
 
-      summary.evaluated++;
-      if (outcome.result.isSuccess) summary.success++;
-      else summary.failed++;
+        summary.evaluated++;
+        summary.evaluatedIds.push(prediction.id);
+        if (outcome.result.isSuccess) summary.success++;
+        else summary.failed++;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Unknown evaluation error';
+        summary.errors.push({ id: prediction.id, error: message });
+      }
     }
 
     return summary;

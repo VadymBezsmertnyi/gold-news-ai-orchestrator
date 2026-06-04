@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { Prisma } from '@prisma/client';
 
 // constants
 import { ANALYSIS_BATCH_LIMIT } from '../../constants';
@@ -142,13 +143,20 @@ export class SchedulerService implements OnModuleInit {
       await this.serverLogs.info(
         SERVER_LOG_TYPES.PREDICTION_EVALUATION,
         'Due prediction evaluation completed',
-        { ...summary },
+        { ...summary } as unknown as Prisma.InputJsonValue,
       );
 
-      if (summary.evaluated > 0)
+      this.logger.log(
+        `Prediction evaluation: dueCandidatesCount=${summary.dueCandidatesCount} evaluated=${summary.evaluated} success=${summary.success} failed=${summary.failed} skipped=${summary.skipped.length} errors=${summary.errors.length}`,
+      );
+      if (summary.evaluatedIds.length > 0)
         this.logger.log(
-          `Prediction evaluation: evaluated=${summary.evaluated} success=${summary.success} failed=${summary.failed}`,
+          `Evaluated prediction ids: ${summary.evaluatedIds.join(', ')}`,
         );
+      for (const skip of summary.skipped)
+        this.logger.warn(`Skipped prediction ${skip.id}: ${skip.reason}`);
+      for (const err of summary.errors)
+        this.logger.error(`Evaluation error for ${err.id}: ${err.error}`);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unknown evaluation error';

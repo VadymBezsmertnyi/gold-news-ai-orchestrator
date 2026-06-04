@@ -25,6 +25,7 @@ import {
   STATS_LABELS,
   translateAnalysisStatus,
   translateLogMessage,
+  translateExpectedResult,
   translatePredictionStatus,
   translateResult,
 } from "@/lib/dashboard-i18n";
@@ -105,8 +106,10 @@ function StatusBadge({
 }
 
 function predictionStatusTone(
-  status: string
+  status: string,
+  isOverdue = false
 ): "pending" | "ok" | "fail" | "muted" {
+  if (status === "PENDING" && isOverdue) return "fail";
   if (status === "PENDING") return "pending";
   if (status === "SUCCESS") return "ok";
   if (status === "FAILED" || status === "EXPIRED") return "fail";
@@ -265,8 +268,10 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.tf}</th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.entry}</th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.current}</th>
+            <th className="px-2 py-1.5">{PREDICTION_HEADERS.delta}</th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.check}</th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.status}</th>
+            <th className="px-2 py-1.5">{PREDICTION_HEADERS.expected}</th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.result}</th>
           </tr>
         </thead>
@@ -295,14 +300,41 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
               <td className="px-2 py-1.5 tabular-nums font-medium text-emerald-800">
                 {formatPrice(row.currentLivePrice)}
               </td>
+              <td
+                className={`px-2 py-1.5 tabular-nums font-medium ${
+                  row.deltaPercent == null
+                    ? "text-zinc-500"
+                    : row.deltaPercent >= 0
+                      ? "text-emerald-800"
+                      : "text-red-800"
+                }`}
+              >
+                {formatPercent(row.deltaPercent)}
+              </td>
               <td className="whitespace-nowrap px-2 py-1.5 text-zinc-600">
                 {formatCheckAfterUk(row.checkAfter)}
               </td>
               <td className="px-2 py-1.5">
                 <StatusBadge
-                  label={translatePredictionStatus(row.status)}
-                  tone={predictionStatusTone(row.status)}
+                  label={translatePredictionStatus(row.status, row.isOverdue)}
+                  tone={predictionStatusTone(row.status, row.isOverdue)}
                 />
+              </td>
+              <td className="px-2 py-1.5">
+                {row.result ? (
+                  "—"
+                ) : (
+                  <StatusBadge
+                    label={translateExpectedResult(row.expectedResult)}
+                    tone={
+                      row.expectedResult === "SUCCESS"
+                        ? "ok"
+                        : row.expectedResult === "FAILED"
+                          ? "fail"
+                          : "muted"
+                    }
+                  />
+                )}
               </td>
               <td className="px-2 py-1.5">
                 {row.result ? (

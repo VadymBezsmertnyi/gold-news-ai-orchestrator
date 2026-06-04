@@ -35,8 +35,11 @@ export interface DashboardPredictionRow {
   expectedMovePercent: number | null;
   timeframeMinutes: number;
   status: string;
+  isOverdue: boolean;
   priceAtPrediction: number | null;
   currentLivePrice: number | null;
+  deltaPercent: number | null;
+  expectedResult: "SUCCESS" | "FAILED" | null;
   checkAfter: string;
   priceBefore: number | null;
   priceAfter: number | null;

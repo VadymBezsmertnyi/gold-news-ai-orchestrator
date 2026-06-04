@@ -31,6 +31,8 @@ export const PREDICTION_HEADERS = {
   current: "Поточна",
   check: "Перевірка",
   status: "Статус",
+  delta: "Δ %",
+  expected: "Очікуваний результат",
   result: "Результат",
 } as const;
 
@@ -66,6 +68,11 @@ const PREDICTION_STATUS_UA: Record<string, string> = {
   EXPIRED: "Прострочено",
 };
 
+const EXPECTED_RESULT_UA: Record<string, string> = {
+  SUCCESS: "Ймовірний успіх",
+  FAILED: "Ймовірна помилка",
+};
+
 const RESULT_UA: Record<string, string> = {
   SUCCESS: "Успіх",
   FAILED: "Помилка",
@@ -91,8 +98,19 @@ export function translateAnalysisStatus(status: string): string {
   return ANALYSIS_STATUS_UA[status] ?? status;
 }
 
-export function translatePredictionStatus(status: string): string {
+export function translatePredictionStatus(
+  status: string,
+  isOverdue = false
+): string {
+  if (status === "PENDING" && isOverdue) return "Не оцінено";
   return PREDICTION_STATUS_UA[status] ?? status;
+}
+
+export function translateExpectedResult(
+  expected: "SUCCESS" | "FAILED" | null
+): string {
+  if (!expected) return "—";
+  return EXPECTED_RESULT_UA[expected] ?? expected;
 }
 
 export function translateResult(result: string | null): string {

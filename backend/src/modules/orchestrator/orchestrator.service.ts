@@ -40,8 +40,11 @@ export interface DashboardPredictionRow {
   expectedMovePercent: number | null;
   timeframeMinutes: number;
   status: string;
+  isOverdue: boolean;
   priceAtPrediction: number | null;
   currentLivePrice: number | null;
+  deltaPercent: number | null;
+  expectedResult: 'SUCCESS' | 'FAILED' | null;
   checkAfter: Date;
   priceBefore: number | null;
   priceAfter: number | null;
@@ -215,25 +218,49 @@ export class OrchestratorService {
         analyzedNewsCount,
         failedAnalysisNewsCount,
       },
-      recentPredictions: recentPredictions.map((p) => ({
-        id: p.id,
-        newsTitle:
-          p.sourceType === PredictionSourceType.GLOBAL_CONTEXT
-            ? 'Глобальний контекст ринку'
-            : (p.newsItem?.title ?? '—'),
-        sourceType: p.sourceType,
-        direction: p.direction,
-        confidence: p.confidence,
-        expectedMovePercent: p.expectedMovePercent,
-        timeframeMinutes: p.timeframeMinutes,
-        status: p.status,
-        priceAtPrediction: p.priceAtPrediction,
-        currentLivePrice: p.result?.priceAfter ?? livePrice,
-        checkAfter: p.checkAfter,
-        priceBefore: p.result?.priceBefore ?? p.priceAtPrediction,
-        priceAfter: p.result?.priceAfter ?? null,
-        result: p.result ? (p.result.isSuccess ? 'SUCCESS' : 'FAILED') : null,
-      })),
+      recentPredictions: recentPredictions.map((p) => {
+        const now = new Date();
+        const entry = p.priceAtPrediction;
+        const current = p.result?.priceAfter ?? livePrice;
+        const isOverdue =
+          p.status === PredictionStatus.PENDING &&
+          !p.result &&
+          p.checkAfter <= now;
+        let deltaPercent: number | null = null;
+        let expectedResult: 'SUCCESS' | 'FAILED' | null = null;
+        if (entry != null && current != null) {
+          deltaPercent = entry === 0 ? 0 : ((current - entry) / entry) * 100;
+          if (!p.result)
+            expectedResult = this.predictionsService.previewEvaluationOutcome(
+              p.direction,
+              entry,
+              current,
+            );
+        }
+
+        return {
+          id: p.id,
+          newsTitle:
+            p.sourceType === PredictionSourceType.GLOBAL_CONTEXT
+              ? 'Глобальний контекст ринку'
+              : (p.newsItem?.title ?? '—'),
+          sourceType: p.sourceType,
+          direction: p.direction,
+          confidence: p.confidence,
+          expectedMovePercent: p.expectedMovePercent,
+          timeframeMinutes: p.timeframeMinutes,
+          status: p.status,
+          isOverdue,
+          priceAtPrediction: entry,
+          currentLivePrice: current,
+          deltaPercent,
+          expectedResult,
+          checkAfter: p.checkAfter,
+          priceBefore: p.result?.priceBefore ?? entry,
+          priceAfter: p.result?.priceAfter ?? null,
+          result: p.result ? (p.result.isSuccess ? 'SUCCESS' : 'FAILED') : null,
+        };
+      }),
       recentNews: (recentNews as DashboardNewsRow[]).map((row) => ({
         ...row,
         analysisSummaryPreview: row.analysisSummary
