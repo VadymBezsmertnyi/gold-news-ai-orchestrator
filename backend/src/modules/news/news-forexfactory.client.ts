@@ -47,13 +47,9 @@ export class NewsForexFactoryClient {
   });
 
   constructor() {
-    if (hasForexFactoryCookie()) {
-      this.logger.log('ForexFactory HTTP: browser cookie configured');
-    } else {
-      this.logger.warn(
-        'ForexFactory HTTP: no FOREX_FACTORY_COOKIE — APIs may return 403 locally',
-      );
-    }
+    this.logger.log(
+      `ForexFactory HTTP: cookie ${hasForexFactoryCookie() ? 'configured' : 'missing'} (env or default in http-config)`,
+    );
   }
 
   getNewsCalendarApiUrl(): string {
