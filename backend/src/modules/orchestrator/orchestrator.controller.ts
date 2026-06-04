@@ -1,7 +1,14 @@
-import { Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Post } from '@nestjs/common';
 
 // local
-import { OrchestratorService } from './orchestrator.service';
+import {
+  GlobalContextTrigger,
+  OrchestratorService,
+} from './orchestrator.service';
+
+class RunGlobalContextDto {
+  trigger?: GlobalContextTrigger;
+}
 
 @Controller('orchestrator')
 export class OrchestratorController {
@@ -17,8 +24,14 @@ export class OrchestratorController {
     return this.orchestratorService.analyzePendingNews();
   }
 
-  @Get('global-context-placeholder')
-  getGlobalContextPlaceholder() {
-    return this.orchestratorService.getGlobalContextPlaceholder();
+  @Post('global-context/run')
+  runGlobalContext(@Body() body: RunGlobalContextDto) {
+    const trigger = body?.trigger ?? 'MANUAL';
+    return this.orchestratorService.runGlobalMarketContextAnalysis(trigger);
+  }
+
+  @Get('global-context/latest')
+  getLatestGlobalContext() {
+    return this.orchestratorService.getLatestGlobalContext();
   }
 }

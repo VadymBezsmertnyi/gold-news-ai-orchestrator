@@ -29,13 +29,13 @@ export interface MetaApiLivePriceState {
     ) => Promise<void>;
   } | null;
   synchronizationListener: unknown | null;
-  isStopping: boolean;
   isConnecting: boolean;
   isSynchronized: boolean;
   brokerReady: boolean;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
   waitBrokerInFlight: Promise<MetatraderAccount> | null;
   latestPrice: LiveGoldPrice | null;
+  marketDataSubscribed: boolean;
 }
 
 export const initialMetaApiLivePriceState = (): MetaApiLivePriceState => ({
@@ -43,13 +43,13 @@ export const initialMetaApiLivePriceState = (): MetaApiLivePriceState => ({
   currentAccount: null,
   connectionInstance: null,
   synchronizationListener: null,
-  isStopping: false,
   isConnecting: false,
   isSynchronized: false,
   brokerReady: false,
   reconnectTimer: null,
   waitBrokerInFlight: null,
   latestPrice: null,
+  marketDataSubscribed: false,
 });
 
 export class MetaApiLivePriceStateStore {

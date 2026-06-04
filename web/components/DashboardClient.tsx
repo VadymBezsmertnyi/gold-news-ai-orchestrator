@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
 // react
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 // lib
-import { fetchDashboard } from '@/lib/api';
+import { fetchDashboard } from "@/lib/api";
 import {
   formatCheckAfterUk,
   formatDateTimeUk,
@@ -13,29 +13,31 @@ import {
   formatTimeUk,
   metaPreview,
   sortPredictionsByCheckAfter,
-} from '@/lib/dashboard-format';
+} from "@/lib/dashboard-format";
 import {
   connectionBadgeLabel,
   LOG_HEADERS,
   NEWS_HEADERS,
   PREDICTION_HEADERS,
   SECTION_TITLES,
+  predictionSourceLabel,
   sourceBadgeLabel,
   STATS_LABELS,
   translateAnalysisStatus,
   translateLogMessage,
   translatePredictionStatus,
   translateResult,
-} from '@/lib/dashboard-i18n';
+} from "@/lib/dashboard-i18n";
 import type {
+  DashboardGlobalContext,
   DashboardNewsRow,
   DashboardPredictionRow,
   DashboardResponse,
   DashboardServerLogRow,
-} from '@/lib/types';
+} from "@/lib/types";
 
 const REFRESH_MS = 10_000;
-const PAGE_MAX = 'max-w-[1600px]';
+const PAGE_MAX = "max-w-[1600px]";
 
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
@@ -43,20 +45,37 @@ function StatCard({ label, value }: { label: string; value: number }) {
       <p className="truncate text-[10px] font-medium uppercase tracking-wide text-zinc-500">
         {label}
       </p>
-      <p className="text-lg font-semibold leading-tight text-amber-950">{value}</p>
+      <p className="text-lg font-semibold leading-tight text-amber-950">
+        {value}
+      </p>
     </div>
+  );
+}
+
+function SourceTypeBadge({ sourceType }: { sourceType: string }) {
+  const isGlobal = sourceType === "GLOBAL_CONTEXT";
+  return (
+    <span
+      className={
+        isGlobal
+          ? "inline-block rounded border border-violet-200 bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800"
+          : "inline-block rounded border border-sky-200 bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800"
+      }
+    >
+      {predictionSourceLabel(sourceType)}
+    </span>
   );
 }
 
 function DirectionBadge({ direction }: { direction: string }) {
   const styles: Record<string, string> = {
-    BUY: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    SELL: 'bg-red-100 text-red-800 border-red-200',
-    NEUTRAL: 'bg-zinc-100 text-zinc-700 border-zinc-200',
+    BUY: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    SELL: "bg-red-100 text-red-800 border-red-200",
+    NEUTRAL: "bg-zinc-100 text-zinc-700 border-zinc-200",
   };
   return (
     <span
-      className={`inline-block rounded border px-1.5 py-0.5 text-xs font-semibold ${styles[direction] ?? 'bg-zinc-100'}`}
+      className={`inline-block rounded border px-1.5 py-0.5 text-xs font-semibold ${styles[direction] ?? "bg-zinc-100"}`}
     >
       {direction}
     </span>
@@ -68,13 +87,13 @@ function StatusBadge({
   tone,
 }: {
   label: string;
-  tone: 'pending' | 'ok' | 'fail' | 'muted';
+  tone: "pending" | "ok" | "fail" | "muted";
 }) {
   const styles = {
-    pending: 'bg-amber-100 text-amber-900 border-amber-200',
-    ok: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    fail: 'bg-red-100 text-red-800 border-red-200',
-    muted: 'bg-zinc-100 text-zinc-600 border-zinc-200',
+    pending: "bg-amber-100 text-amber-900 border-amber-200",
+    ok: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    fail: "bg-red-100 text-red-800 border-red-200",
+    muted: "bg-zinc-100 text-zinc-600 border-zinc-200",
   };
   return (
     <span
@@ -86,26 +105,26 @@ function StatusBadge({
 }
 
 function predictionStatusTone(
-  status: string,
-): 'pending' | 'ok' | 'fail' | 'muted' {
-  if (status === 'PENDING') return 'pending';
-  if (status === 'SUCCESS') return 'ok';
-  if (status === 'FAILED' || status === 'EXPIRED') return 'fail';
-  return 'muted';
+  status: string
+): "pending" | "ok" | "fail" | "muted" {
+  if (status === "PENDING") return "pending";
+  if (status === "SUCCESS") return "ok";
+  if (status === "FAILED" || status === "EXPIRED") return "fail";
+  return "muted";
 }
 
 function analysisStatusTone(
-  status: string,
-): 'pending' | 'ok' | 'fail' | 'muted' {
-  if (status === 'PENDING') return 'pending';
-  if (status === 'ANALYZED') return 'ok';
-  if (status === 'FAILED') return 'fail';
-  return 'muted';
+  status: string
+): "pending" | "ok" | "fail" | "muted" {
+  if (status === "PENDING") return "pending";
+  if (status === "ANALYZED") return "ok";
+  if (status === "FAILED") return "fail";
+  return "muted";
 }
 
 function HeaderLivePrice({ dashboard }: { dashboard: DashboardResponse }) {
   const { marketPrice, metaApiStatus } = dashboard;
-  const isMeta = marketPrice.source === 'metaapi';
+  const isMeta = marketPrice.source === "metaapi";
 
   return (
     <div className="shrink-0 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-2.5 shadow-sm">
@@ -114,8 +133,8 @@ function HeaderLivePrice({ dashboard }: { dashboard: DashboardResponse }) {
         <span
           className={
             isMeta
-              ? 'rounded bg-emerald-600 px-1.5 py-0.5 text-white'
-              : 'rounded bg-amber-500 px-1.5 py-0.5 text-white'
+              ? "rounded bg-emerald-600 px-1.5 py-0.5 text-white"
+              : "rounded bg-amber-500 px-1.5 py-0.5 text-white"
           }
         >
           {sourceBadgeLabel(marketPrice.source)}
@@ -123,8 +142,8 @@ function HeaderLivePrice({ dashboard }: { dashboard: DashboardResponse }) {
         <span
           className={
             metaApiStatus.connected
-              ? 'rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800'
-              : 'rounded bg-amber-100 px-1.5 py-0.5 text-amber-900'
+              ? "rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800"
+              : "rounded bg-amber-100 px-1.5 py-0.5 text-amber-900"
           }
         >
           {connectionBadgeLabel(metaApiStatus.connected)}
@@ -162,22 +181,26 @@ function DashboardHeader({
           <ul className="mt-1 space-y-0.5 text-xs text-zinc-600">
             <li>Автооновлення: кожні 10 сек</li>
             <li>
-              Останнє оновлення:{' '}
-              {lastUpdated ? formatTimeUk(lastUpdated) : '—'}
+              Останнє оновлення: {lastUpdated ? formatTimeUk(lastUpdated) : "—"}
             </li>
             <li>
-              Остання синхронізація новин:{' '}
+              Остання синхронізація новин:{" "}
               {dashboard.lastNewsSyncAt
                 ? formatDateTimeUk(dashboard.lastNewsSyncAt)
-                : '—'}
+                : "—"}
             </li>
           </ul>
         </div>
         <HeaderLivePrice dashboard={dashboard} />
       </div>
 
-      <div className={`mx-auto grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-4 lg:grid-cols-8 ${PAGE_MAX}`}>
-        <StatCard label={STATS_LABELS.totalNews} value={dashboard.stats.totalNews} />
+      <div
+        className={`mx-auto grid grid-cols-2 gap-2 px-4 pb-3 sm:grid-cols-4 lg:grid-cols-8 ${PAGE_MAX}`}
+      >
+        <StatCard
+          label={STATS_LABELS.totalNews}
+          value={dashboard.stats.totalNews}
+        />
         <StatCard
           label={STATS_LABELS.pendingAnalysis}
           value={dashboard.stats.pendingAnalysisNewsCount}
@@ -232,7 +255,10 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
       <table className="min-w-full text-left text-xs">
         <thead className="border-b border-zinc-200 bg-zinc-50 text-[10px] uppercase text-zinc-500">
           <tr>
-            <th className="px-2 py-1.5 font-medium">{PREDICTION_HEADERS.news}</th>
+            <th className="px-2 py-1.5 font-medium">
+              {PREDICTION_HEADERS.news}
+            </th>
+            <th className="px-2 py-1.5">{PREDICTION_HEADERS.source}</th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.direction}</th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.confidence}</th>
             <th className="px-2 py-1.5">{PREDICTION_HEADERS.move}</th>
@@ -251,13 +277,18 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                 {row.newsTitle}
               </td>
               <td className="px-2 py-1.5">
+                <SourceTypeBadge sourceType={row.sourceType} />
+              </td>
+              <td className="px-2 py-1.5">
                 <DirectionBadge direction={row.direction} />
               </td>
               <td className="px-2 py-1.5 tabular-nums">{row.confidence}%</td>
               <td className="px-2 py-1.5 tabular-nums">
                 {formatPercent(row.expectedMovePercent)}
               </td>
-              <td className="px-2 py-1.5 tabular-nums">{row.timeframeMinutes}хв</td>
+              <td className="px-2 py-1.5 tabular-nums">
+                {row.timeframeMinutes}хв
+              </td>
               <td className="px-2 py-1.5 tabular-nums">
                 {formatPrice(row.priceAtPrediction)}
               </td>
@@ -277,10 +308,10 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                 {row.result ? (
                   <StatusBadge
                     label={translateResult(row.result)}
-                    tone={row.result === 'SUCCESS' ? 'ok' : 'fail'}
+                    tone={row.result === "SUCCESS" ? "ok" : "fail"}
                   />
                 ) : (
-                  '—'
+                  "—"
                 )}
               </td>
             </tr>
@@ -317,7 +348,9 @@ function RecentNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
         <tbody className="divide-y divide-zinc-100">
           {rows.map((row) => (
             <tr key={row.id} className="align-top hover:bg-amber-50/50">
-              <td className="max-w-[12rem] px-2 py-1.5 font-medium">{row.title}</td>
+              <td className="max-w-[12rem] px-2 py-1.5 font-medium">
+                {row.title}
+              </td>
               <td className="px-2 py-1.5">{row.source}</td>
               <td className="whitespace-nowrap px-2 py-1.5 text-zinc-600">
                 {formatDateTimeUk(row.publishedAt)}
@@ -328,11 +361,11 @@ function RecentNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
                   tone={analysisStatusTone(row.analysisStatus)}
                 />
               </td>
-              <td className="px-2 py-1.5">{row.category ?? '—'}</td>
-              <td className="px-2 py-1.5">{row.impactLevel ?? '—'}</td>
-              <td className="px-2 py-1.5">{row.goldImpact ?? '—'}</td>
+              <td className="px-2 py-1.5">{row.category ?? "—"}</td>
+              <td className="px-2 py-1.5">{row.impactLevel ?? "—"}</td>
+              <td className="px-2 py-1.5">{row.goldImpact ?? "—"}</td>
               <td className="max-w-md px-2 py-1.5 text-zinc-600">
-                {row.analysisSummaryPreview ?? '—'}
+                {row.analysisSummaryPreview ?? "—"}
               </td>
             </tr>
           ))}
@@ -373,12 +406,59 @@ function PendingNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
   );
 }
 
+function GlobalContextCard({ ctx }: { ctx: DashboardGlobalContext }) {
+  return (
+    <div className="rounded-lg border border-violet-200/80 bg-gradient-to-br from-violet-50 to-white px-4 py-3 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <DirectionBadge direction={ctx.globalBias} />
+        <span className="text-xs text-zinc-600">
+          Впевненість: <strong>{ctx.confidence}%</strong>
+        </span>
+        <span className="text-[10px] text-zinc-500">
+          {formatDateTimeUk(ctx.createdAt)}
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-zinc-800">{ctx.summary}</p>
+      {ctx.activeDrivers.length > 0 ? (
+        <div className="mt-2">
+          <p className="text-[10px] font-semibold uppercase text-zinc-500">
+            Драйвери
+          </p>
+          <ul className="mt-1 list-inside list-disc text-xs text-zinc-700">
+            {ctx.activeDrivers.map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {ctx.riskNotes.length > 0 ? (
+        <div className="mt-2">
+          <p className="text-[10px] font-semibold uppercase text-amber-800/80">
+            Ризики
+          </p>
+          <ul className="mt-1 list-inside list-disc text-xs text-amber-900/90">
+            {ctx.riskNotes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function LearningRulesList({
   rules,
 }: {
-  rules: DashboardResponse['learningRules'];
+  rules: DashboardResponse["learningRules"];
 }) {
-  if (rules.length === 0) return null;
+  if (rules.length === 0)
+    return (
+      <p className="text-xs text-zinc-500">
+        Правила зʼявляться після невдалих прогнозів (якщо агент навчання їх
+        створить).
+      </p>
+    );
 
   return (
     <ul className="space-y-2">
@@ -387,8 +467,21 @@ function LearningRulesList({
           key={rule.id}
           className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs"
         >
-          <span className="font-medium text-zinc-900">{rule.title}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-zinc-900">{rule.title}</span>
+            {rule.isActive ? (
+              <StatusBadge label="Активне" tone="ok" />
+            ) : (
+              <StatusBadge label="Неактивне" tone="muted" />
+            )}
+          </div>
           <p className="mt-1 text-zinc-600">{rule.description}</p>
+          <p className="mt-1 text-[10px] text-zinc-500">
+            {formatDateTimeUk(rule.createdAt)}
+            {rule.sourcePredictionId
+              ? ` · прогноз ${rule.sourcePredictionId.slice(0, 8)}…`
+              : ""}
+          </p>
         </li>
       ))}
     </ul>
@@ -397,13 +490,13 @@ function LearningRulesList({
 
 function LogLevelBadge({ level }: { level: string }) {
   const styles: Record<string, string> = {
-    info: 'bg-sky-900 text-sky-200',
-    warn: 'bg-amber-900 text-amber-200',
-    error: 'bg-red-900 text-red-200',
+    info: "bg-sky-900 text-sky-200",
+    warn: "bg-amber-900 text-amber-200",
+    error: "bg-red-900 text-red-200",
   };
   return (
     <span
-      className={`rounded px-1 py-0.5 text-[10px] font-medium ${styles[level] ?? 'bg-zinc-800'}`}
+      className={`rounded px-1 py-0.5 text-[10px] font-medium ${styles[level] ?? "bg-zinc-800"}`}
     >
       {level}
     </span>
@@ -495,7 +588,7 @@ export default function DashboardClient() {
 
   const pendingNews = useMemo(() => {
     if (!dashboard) return [];
-    return dashboard.recentNews.filter((n) => n.analysisStatus === 'PENDING');
+    return dashboard.recentNews.filter((n) => n.analysisStatus === "PENDING");
   }, [dashboard]);
 
   return (
@@ -518,6 +611,19 @@ export default function DashboardClient() {
         {dashboard ? (
           <>
             <section>
+              <SectionTitle>{SECTION_TITLES.globalContext}</SectionTitle>
+              {dashboard.globalContext ? (
+                <GlobalContextCard ctx={dashboard.globalContext} />
+              ) : (
+                <p className="text-xs text-zinc-500">
+                  Глобальний контекст ще не згенеровано. Запустіть вручну POST
+                  /orchestrator/global-context/run або дочекайтесь події / 30
+                  хв.
+                </p>
+              )}
+            </section>
+
+            <section>
               <SectionTitle>{SECTION_TITLES.predictions}</SectionTitle>
               <PredictionsTable rows={sortedPredictions} />
             </section>
@@ -534,12 +640,10 @@ export default function DashboardClient() {
               </section>
             ) : null}
 
-            {dashboard.learningRules.length > 0 ? (
-              <section>
-                <SectionTitle>{SECTION_TITLES.learningRules}</SectionTitle>
-                <LearningRulesList rules={dashboard.learningRules} />
-              </section>
-            ) : null}
+            <section>
+              <SectionTitle>{SECTION_TITLES.learningRules}</SectionTitle>
+              <LearningRulesList rules={dashboard.learningRules} />
+            </section>
 
             <section>
               <SectionTitle>{SECTION_TITLES.logs}</SectionTitle>

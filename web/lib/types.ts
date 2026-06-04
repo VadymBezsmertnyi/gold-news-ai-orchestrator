@@ -3,7 +3,7 @@ export interface DashboardMarketPrice {
   price: number;
   bid: number;
   ask: number;
-  source: 'metaapi' | 'mock';
+  source: "metaapi" | "mock";
   connected: boolean;
   updatedAt: string;
 }
@@ -29,6 +29,7 @@ export interface DashboardStats {
 export interface DashboardPredictionRow {
   id: string;
   newsTitle: string;
+  sourceType: "SINGLE_NEWS" | "GLOBAL_CONTEXT" | string;
   direction: string;
   confidence: number;
   expectedMovePercent: number | null;
@@ -65,20 +66,14 @@ export interface DashboardServerLogRow {
   createdAt: string;
 }
 
-export interface GlobalContextPlaceholder {
-  placeholder: boolean;
-  message: string;
-  newsWindow: { start: string; end: string };
-  newsInWindowCount: number;
-  newsInWindow: Array<{
-    id: string;
-    title: string;
-    publishedAt: string;
-    analysisStatus: string;
-  }>;
-  latestStoredContext: unknown;
-  suggestedGlobalBias: string | null;
-  suggestedConfidence: number | null;
+export interface DashboardGlobalContext {
+  id: string;
+  globalBias: string;
+  confidence: number;
+  summary: string;
+  activeDrivers: string[];
+  riskNotes: string[];
+  createdAt: string;
 }
 
 export interface LearningRule {
@@ -99,7 +94,7 @@ export interface DashboardResponse {
   recentNews: DashboardNewsRow[];
   recentServerLogs: DashboardServerLogRow[];
   lastNewsSyncAt: string | null;
-  globalContext: GlobalContextPlaceholder;
+  globalContext: DashboardGlobalContext | null;
   learningRules: LearningRule[];
   orchestratorNote: string;
 }

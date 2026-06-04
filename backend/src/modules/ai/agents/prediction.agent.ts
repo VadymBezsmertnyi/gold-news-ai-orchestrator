@@ -16,6 +16,8 @@ export class PredictionAgent {
   constructor(private readonly llmRouter: LlmRouterService) {}
 
   async run(input: PredictionAgentInput): Promise<PredictionAgentOutput> {
+    const learningRulesJson = JSON.stringify(input.learningRules ?? []);
+
     return this.llmRouter.askJson<PredictionAgentOutput>({
       provider: LlmProviderType.OPENAI,
       model: process.env.OPENAI_MODEL_FAST || 'gpt-4.1-mini',
@@ -35,7 +37,8 @@ Context:
   "goldImpact": "${input.goldImpact || ''}",
   "impactReason": "${input.impactReason || ''}",
   "currentPrice": ${input.currentPrice},
-  "publishedAt": "${input.publishedAt.toISOString()}"
+  "publishedAt": "${input.publishedAt.toISOString()}",
+  "learningRules": ${learningRulesJson}
 }
 
 Rules:
@@ -46,6 +49,7 @@ Rules:
 - confidence must be 1-100.
 - expectedMovePercent must be realistic for the timeframe.
 - timeframeMinutes should be 30, 60, 120, 240, or 1440.
+- Learning rules are historical observations, not absolute truth. Consider them cautiously; do not follow them blindly.
 - This is educational analytics only.
 
 Return JSON:

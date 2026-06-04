@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 
 // modules
 import { AgentsModule } from '../agents/agents.module';
@@ -17,7 +17,7 @@ import { OrchestratorService } from './orchestrator.service';
     AiModule,
     MarketModule,
     NewsModule,
-    PredictionsModule,
+    forwardRef(() => PredictionsModule),
     LearningModule,
     AgentsModule,
   ],

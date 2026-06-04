@@ -77,7 +77,7 @@ model MarketContextAnalysis {
 
 model Prediction {
   id                  String               @id @default(cuid())
-  newsItemId          String
+  newsItemId          String?
   direction           PredictionDirection
   confidence          Int
   expectedMovePercent Float?
@@ -95,7 +95,7 @@ model Prediction {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
-  newsItem      NewsItem               @relation(fields: [newsItemId], references: [id], onDelete: Cascade)
+  newsItem      NewsItem?              @relation(fields: [newsItemId], references: [id], onDelete: Cascade)
   globalContext MarketContextAnalysis? @relation(fields: [globalContextId], references: [id], onDelete: SetNull)
   result        PredictionResult?
 

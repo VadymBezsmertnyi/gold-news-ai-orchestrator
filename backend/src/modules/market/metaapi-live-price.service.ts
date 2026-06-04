@@ -1,5 +1,4 @@
 import {
-  BeforeApplicationShutdown,
   forwardRef,
   Inject,
   Injectable,
@@ -52,17 +51,21 @@ const sleep = (ms: number): Promise<void> =>
   new Promise((r) => setTimeout(r, ms));
 
 @Injectable()
-export class MetaApiLivePriceService
-  implements OnModuleInit, OnModuleDestroy, BeforeApplicationShutdown
-{
+export class MetaApiLivePriceService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MetaApiLivePriceService.name);
   private readonly stateStore = new MetaApiLivePriceStateStore();
   private readonly symbol: string;
+
+  private isStopping = false;
+  private isDisconnected = true;
+  private disconnectPromise: Promise<void> | null = null;
+  private connectPromise: Promise<void> | null = null;
+  private disconnectLogged = false;
+
   private lastSnapshotAt = 0;
   private lastLogAt = 0;
   private lastMockWarnAt = 0;
   private lastLoggedPrice: number | null = null;
-  private connectPromise: Promise<void> | null = null;
 
   constructor(
     private readonly config: ConfigService<AppEnv, true>,
@@ -74,6 +77,7 @@ export class MetaApiLivePriceService
   }
 
   onModuleInit(): void {
+    if (!this.isDisconnected || this.isStopping) return;
     void this.connect();
   }
 
@@ -81,13 +85,10 @@ export class MetaApiLivePriceService
     await this.disconnect();
   }
 
-  async beforeApplicationShutdown(): Promise<void> {
-    await this.disconnect();
-  }
-
   isConnected(): boolean {
+    if (this.isDisconnected || this.isStopping) return false;
     const state = this.stateStore.getState();
-    return !!state.connectionInstance && state.brokerReady && !state.isStopping;
+    return !!state.connectionInstance && state.brokerReady;
   }
 
   getLatestPrice(): LiveGoldPrice | null {
@@ -110,6 +111,7 @@ export class MetaApiLivePriceService
   }
 
   async connect(): Promise<void> {
+    if (this.isStopping || !this.isDisconnected) return;
     if (this.connectPromise) return this.connectPromise;
 
     this.connectPromise = this.runConnect();
@@ -121,56 +123,15 @@ export class MetaApiLivePriceService
   }
 
   async disconnect(): Promise<void> {
-    const state = this.stateStore.getState();
-    if (state.isStopping) return;
+    if (this.isDisconnected) return;
+    if (this.disconnectPromise) return this.disconnectPromise;
 
-    this.stateStore.patch({ isStopping: true, isConnecting: false });
-
-    if (state.reconnectTimer) {
-      clearTimeout(state.reconnectTimer);
-      this.stateStore.patch({ reconnectTimer: null });
+    this.disconnectPromise = this.runDisconnect();
+    try {
+      await this.disconnectPromise;
+    } finally {
+      this.disconnectPromise = null;
     }
-
-    const connection = state.connectionInstance;
-    const listener = state.synchronizationListener;
-
-    if (connection && listener) {
-      try {
-        connection.removeSynchronizationListener(listener);
-      } catch (err) {
-        this.logger.warn('MetaApi removeSynchronizationListener error', err);
-      }
-      try {
-        if (connection.unsubscribeFromMarketData) {
-          await connection
-            .unsubscribeFromMarketData(this.symbol, [{ type: 'quotes' }])
-            .catch(() => {});
-        }
-      } catch {
-        /* ignore */
-      }
-      try {
-        await Promise.race([connection.close(), sleep(3000)]);
-      } catch (err) {
-        this.logger.warn('MetaApi close error', err);
-      }
-    }
-
-    const api = state.api;
-    if (api) {
-      try {
-        api.close();
-      } catch (err) {
-        this.logger.warn('MetaApi SDK close error', err);
-      }
-    }
-
-    this.stateStore.reset();
-    await this.serverLogs.info(
-      METAAPI_LOG_TYPES.DISCONNECTED,
-      'MetaAPI disconnected',
-    );
-    this.logger.log('MetaAPI disconnected');
   }
 
   resolveMarketPrice(): MarketPriceView {
@@ -209,9 +170,77 @@ export class MetaApiLivePriceService
     };
   }
 
+  private async runDisconnect(): Promise<void> {
+    if (this.isStopping && this.isDisconnected) return;
+
+    this.isStopping = true;
+    const state = this.stateStore.getState();
+
+    if (state.reconnectTimer) {
+      clearTimeout(state.reconnectTimer);
+      this.stateStore.patch({ reconnectTimer: null });
+    }
+
+    const connection = state.connectionInstance;
+    const listener = state.synchronizationListener;
+
+    if (connection && listener) {
+      try {
+        connection.removeSynchronizationListener(listener);
+      } catch (err) {
+        this.logger.warn('MetaApi removeSynchronizationListener error', err);
+      }
+    }
+
+    if (
+      connection &&
+      state.marketDataSubscribed &&
+      connection.unsubscribeFromMarketData
+    ) {
+      try {
+        await connection
+          .unsubscribeFromMarketData(this.symbol, [{ type: 'quotes' }])
+          .catch(() => {});
+      } catch {
+        /* ignore */
+      }
+      this.stateStore.patch({ marketDataSubscribed: false });
+    }
+
+    if (connection) {
+      try {
+        await Promise.race([connection.close(), sleep(3000)]);
+      } catch (err) {
+        this.logger.warn('MetaApi close error', err);
+      }
+    }
+
+    const api = state.api;
+    if (api) {
+      try {
+        api.close();
+      } catch (err) {
+        this.logger.warn('MetaApi SDK close error', err);
+      }
+    }
+
+    this.stateStore.reset();
+    this.isDisconnected = true;
+    this.isStopping = true;
+
+    if (!this.disconnectLogged) {
+      this.disconnectLogged = true;
+      await this.serverLogs.info(
+        METAAPI_LOG_TYPES.DISCONNECTED,
+        'MetaAPI disconnected',
+      );
+      this.logger.log('MetaAPI disconnected');
+    }
+  }
+
   private async runConnect(): Promise<void> {
     const state = this.stateStore.getState();
-    if (state.isStopping || state.isConnecting) return;
+    if (this.isStopping || state.isConnecting) return;
 
     const token = this.config.get('METAAPI_TOKEN', { infer: true });
     const accountId = this.config.get('METAAPI_ACCOUNT_ID', { infer: true });
@@ -232,7 +261,7 @@ export class MetaApiLivePriceService
     );
 
     try {
-      await this.closeExistingConnection();
+      await this.teardownConnectionResources();
 
       const api = new MetaApi(token, {
         application: 'gold-news-ai-orchestrator',
@@ -264,9 +293,10 @@ export class MetaApiLivePriceService
           );
         },
         onDisconnected: () => {
+          if (this.isStopping) return;
           void this.serverLogs.warn(
             METAAPI_LOG_TYPES.DISCONNECTED,
-            'MetaAPI websocket disconnected',
+            'MetaAPI websocket disconnected (will reconnect)',
           );
           this.scheduleReconnect();
         },
@@ -279,6 +309,7 @@ export class MetaApiLivePriceService
         synchronizationListener: listener,
         isSynchronized: false,
         brokerReady: false,
+        marketDataSubscribed: false,
       });
 
       streamingConn.addSynchronizationListener(listener);
@@ -290,8 +321,12 @@ export class MetaApiLivePriceService
         await streamingConn.subscribeToMarketData(this.symbol, [
           { type: 'quotes', intervalInMilliseconds: 1000 },
         ]);
+        this.stateStore.patch({ marketDataSubscribed: true });
         this.logger.log(`MetaAPI subscribed to ${this.symbol} quotes`);
       }
+
+      this.isDisconnected = false;
+      this.isStopping = false;
 
       await this.serverLogs.info(
         METAAPI_LOG_TYPES.CONNECTED,
@@ -305,13 +340,15 @@ export class MetaApiLivePriceService
         `MetaAPI connect failed: ${message}`,
       );
       this.logger.error('MetaAPI connect failed', error);
-      this.scheduleReconnect();
+      if (!this.isStopping) this.scheduleReconnect();
     } finally {
       this.stateStore.patch({ isConnecting: false });
     }
   }
 
   private handlePriceTick(bid: number, ask: number, time: Date): void {
+    if (this.isStopping) return;
+
     const price = (bid + ask) / 2;
     const live: LiveGoldPrice = {
       symbol: this.symbol,
@@ -350,7 +387,7 @@ export class MetaApiLivePriceService
     });
   }
 
-  private async closeExistingConnection(): Promise<void> {
+  private async teardownConnectionResources(): Promise<void> {
     const state = this.stateStore.getState();
     const connection = state.connectionInstance;
     const listener = state.synchronizationListener;
@@ -363,15 +400,30 @@ export class MetaApiLivePriceService
         /* ignore */
       }
     }
+
+    if (state.marketDataSubscribed && connection.unsubscribeFromMarketData) {
+      try {
+        await connection
+          .unsubscribeFromMarketData(this.symbol, [{ type: 'quotes' }])
+          .catch(() => {});
+      } catch {
+        /* ignore */
+      }
+    }
+
     try {
       await connection.close();
     } catch {
       /* ignore */
     }
+
     this.stateStore.patch({
       connectionInstance: null,
       synchronizationListener: null,
       currentAccount: null,
+      marketDataSubscribed: false,
+      isSynchronized: false,
+      brokerReady: false,
     });
   }
 
@@ -400,8 +452,7 @@ export class MetaApiLivePriceService
     const promise = (async (): Promise<MetatraderAccount> => {
       const start = Date.now();
       while (Date.now() - start < METAAPI_WAIT_BROKER_TIMEOUT_MS) {
-        const s = this.stateStore.getState();
-        if (s.isStopping) break;
+        if (this.isStopping) break;
         const fresh = await api.metatraderAccountApi.getAccount(accountId);
         if (fresh?.connectionStatus === 'CONNECTED') return fresh;
         await sleep(METAAPI_WAIT_BROKER_POLL_MS);
@@ -437,8 +488,7 @@ export class MetaApiLivePriceService
     if (!syncOk && !conn.terminalState) {
       const syncStart = Date.now();
       while (Date.now() - syncStart < METAAPI_WAIT_TERMINAL_STATE_MS) {
-        const s = this.stateStore.getState();
-        if (s.isStopping || conn.terminalState) {
+        if (this.isStopping || conn.terminalState) {
           syncOk = !!conn.terminalState;
           break;
         }
@@ -459,13 +509,13 @@ export class MetaApiLivePriceService
   }
 
   private scheduleReconnect(): void {
+    if (this.isStopping || this.isDisconnected) return;
     const state = this.stateStore.getState();
-    if (state.isStopping || state.reconnectTimer || state.isConnecting) return;
+    if (state.reconnectTimer || state.isConnecting) return;
 
     const timer = setTimeout(() => {
       this.stateStore.patch({ reconnectTimer: null });
-      const s = this.stateStore.getState();
-      if (s.isStopping) return;
+      if (this.isStopping || this.isDisconnected) return;
       void this.connect().catch((err) => {
         this.logger.warn('MetaAPI reconnect failed', err);
       });

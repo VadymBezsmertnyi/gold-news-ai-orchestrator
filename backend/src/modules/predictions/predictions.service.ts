@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   PredictionDirection,
   PredictionSourceType,
@@ -13,6 +18,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 // modules
 import { MarketService } from '../market/market.service';
 import { NewsService } from '../news/news.service';
+import { OrchestratorService } from '../orchestrator/orchestrator.service';
 
 export interface EvaluateDueSummary {
   evaluated: number;
@@ -32,6 +38,8 @@ export class PredictionsService {
     private readonly prisma: PrismaService,
     private readonly newsService: NewsService,
     private readonly marketService: MarketService,
+    @Inject(forwardRef(() => OrchestratorService))
+    private readonly orchestratorService: OrchestratorService,
   ) {}
 
   async findAll(limit = 50): Promise<Prediction[]> {
@@ -191,6 +199,13 @@ export class PredictionsService {
     });
 
     const updated = await this.findById(predictionId);
+
+    void this.orchestratorService
+      .onPredictionEvaluated(updated, result)
+      .catch((err) => {
+        console.warn('Post-evaluation orchestrator hook failed', err);
+      });
+
     return { prediction: updated, result, alreadyEvaluated: false };
   }
 

@@ -112,6 +112,23 @@ export class SchedulerService implements OnModuleInit {
     }
   }
 
+  @Cron('0 */30 * * * *')
+  async handleScheduledGlobalContext(): Promise<void> {
+    try {
+      await this.orchestratorService.runGlobalMarketContextAnalysis(
+        'SCHEDULED_30M',
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown global context error';
+      await this.serverLogs.error(
+        SERVER_LOG_TYPES.GLOBAL_CONTEXT_ERROR,
+        `Scheduled global context failed: ${message}`,
+      );
+      this.logger.error('Scheduled global context failed', error);
+    }
+  }
+
   @Cron(CronExpression.EVERY_MINUTE)
   async handleDuePredictionEvaluation(): Promise<void> {
     await this.serverLogs.info(

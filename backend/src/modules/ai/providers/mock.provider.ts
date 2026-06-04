@@ -25,6 +25,26 @@ export class MockProvider implements LlmProvider {
         keyDrivers: ['mock_driver_usd', 'mock_driver_rates'],
       } as T;
 
+    if (prompt.includes('globalbias') || prompt.includes('global gold'))
+      return {
+        globalBias: 'NEUTRAL',
+        confidence: 55,
+        expectedMovePercent: 0.15,
+        timeframeMinutes: 120,
+        summary: 'Mock global context: mixed drivers, neutral bias for demo.',
+        activeDrivers: ['mock_usd', 'mock_rates'],
+        riskNotes: ['mock_volatility'],
+      } as T;
+
+    if (prompt.includes('shouldcreaterule') || prompt.includes('post-mortem'))
+      return {
+        shouldCreateRule: false,
+        title: 'Mock learning skip',
+        description: 'Mock: no new rule for demo failure.',
+        confidence: 40,
+        reason: 'Mock learning agent — pattern not strong enough.',
+      } as T;
+
     if (
       prompt.includes('educational prediction') ||
       prompt.includes('direction')
@@ -33,7 +53,7 @@ export class MockProvider implements LlmProvider {
         direction: 'BUY',
         confidence: 68,
         expectedMovePercent: 0.25,
-        timeframeMinutes: 1,
+        timeframeMinutes: 60,
         reason: 'Mock prediction for local demo pipeline.',
       } as T;
 

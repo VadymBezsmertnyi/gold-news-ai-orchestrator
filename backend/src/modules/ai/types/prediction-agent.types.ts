@@ -1,5 +1,11 @@
 import { PredictionDirection } from '@prisma/client';
 
+export type PredictionAgentLearningRuleSlice = {
+  id: string;
+  title: string;
+  description: string;
+};
+
 export type PredictionAgentInput = {
   title: string;
   summary?: string | null;
@@ -9,6 +15,7 @@ export type PredictionAgentInput = {
   impactReason?: string | null;
   currentPrice: number;
   publishedAt: Date;
+  learningRules?: PredictionAgentLearningRuleSlice[];
 };
 
 export type PredictionAgentOutput = {

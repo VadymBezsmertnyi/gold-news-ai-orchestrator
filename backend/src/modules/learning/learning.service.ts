@@ -17,6 +17,13 @@ export class LearningService {
     });
   }
 
+  async findActive(): Promise<LearningRule[]> {
+    return this.prisma.learningRule.findMany({
+      where: { isActive: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async create(dto: CreateLearningRuleDto): Promise<LearningRule> {
     return this.prisma.learningRule.create({
       data: {
