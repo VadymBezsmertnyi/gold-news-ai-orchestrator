@@ -1,14 +1,15 @@
 /** Ukrainian labels and value mappings for the local demo dashboard. */
 
-export const STATS_LABELS = {
-  totalNews: "Новин всього",
-  pendingAnalysis: "Очікують аналізу",
-  analyzed: "Проаналізовано",
-  failedAnalysis: "Помилки аналізу",
-  pendingPredictions: "Очікують прогнозу",
-  activePredictions: "Активні прогнози",
-  successful: "Успішні",
-  failed: "Неуспішні",
+/** Compact header chip labels (terminal-style). */
+export const HEADER_STAT_CHIPS = {
+  news: "новин",
+  pendingAnalysis: "очік. аналіз",
+  analyzed: "проаналіз.",
+  analysisFailed: "помилки аналізу",
+  pendingPredictions: "очік. прогноз",
+  activePredictions: "активні",
+  success: "успішні",
+  failed: "неуспішні",
 } as const;
 
 export const SECTION_TITLES = {

@@ -44,7 +44,6 @@ import {
 } from "@/lib/dashboard-grouping";
 import {
   CHIP_LABELS,
-  connectionBadgeLabel,
   CURRENT_OR_FINAL_PRICE_TOOLTIP,
   GOAL_COMPLETION_TOOLTIP,
   GLOBAL_CONTEXT_LABELS,
@@ -58,7 +57,7 @@ import {
   predictionSourceLabel,
   scorePercentTone,
   sourceBadgeLabel,
-  STATS_LABELS,
+  HEADER_STAT_CHIPS,
   translateAnalysisStatus,
   translateBaselineSource,
   translateDirectionGuessBadge,
@@ -87,16 +86,36 @@ const TD = "px-2 py-1 align-top text-[10px] leading-tight";
 const TD_NUM = `${TD} tabular-nums`;
 const PRICE_TARGET_CLASS = "font-medium text-violet-900";
 
-function StatCard({ label, value }: { label: string; value: number }) {
+type HeaderChipTone = "info" | "pending" | "ok" | "fail" | "active";
+
+function HeaderStatChip({
+  emoji,
+  value,
+  label,
+  tone,
+}: {
+  emoji: string;
+  value: number;
+  label: string;
+  tone: HeaderChipTone;
+}) {
+  const styles: Record<HeaderChipTone, string> = {
+    info: "border-zinc-200 bg-zinc-50 text-zinc-800",
+    pending: "border-amber-200 bg-amber-50 text-amber-950",
+    ok: "border-emerald-200 bg-emerald-50 text-emerald-900",
+    fail: "border-red-200 bg-red-50 text-red-900",
+    active: "border-sky-200 bg-sky-50 text-sky-900",
+  };
   return (
-    <div className="rounded-md border border-zinc-200/90 bg-white px-2 py-1.5 shadow-sm">
-      <p className="truncate text-[9px] font-medium uppercase tracking-wide text-zinc-500">
-        {label}
-      </p>
-      <p className="text-base font-semibold leading-tight tabular-nums text-amber-950">
-        {value}
-      </p>
-    </div>
+    <span
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10px] font-medium leading-tight tabular-nums ${styles[tone]}`}
+    >
+      <span className="text-[11px] leading-none" aria-hidden>
+        {emoji}
+      </span>
+      <strong>{value}</strong>
+      <span className="font-normal opacity-90">{label}</span>
+    </span>
   );
 }
 
@@ -554,41 +573,114 @@ function analysisStatusTone(
 function HeaderLivePrice({ dashboard }: { dashboard: DashboardResponse }) {
   const { marketPrice, metaApiStatus } = dashboard;
   const isMeta = marketPrice.source === "metaapi";
+  const online = metaApiStatus.connected;
 
   return (
-    <div className="shrink-0 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-2.5 shadow-sm">
-      <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-        <span>XAUUSD</span>
-        <span
-          className={
-            isMeta
-              ? "rounded bg-emerald-600 px-1.5 py-0.5 text-white"
-              : "rounded bg-amber-500 px-1.5 py-0.5 text-white"
-          }
-        >
-          {sourceBadgeLabel(marketPrice.source)}
+    <div className="max-h-[60px] shrink-0 rounded border border-zinc-300/80 bg-zinc-900 px-2.5 py-1 text-zinc-100 shadow-sm">
+      <div className="flex items-baseline gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+          XAUUSD
         </span>
-        <span
-          className={
-            metaApiStatus.connected
-              ? "rounded bg-emerald-100 px-1.5 py-0.5 text-emerald-800"
-              : "rounded bg-amber-100 px-1.5 py-0.5 text-amber-900"
-          }
-        >
-          {connectionBadgeLabel(metaApiStatus.connected)}
+        <span className="text-lg font-bold leading-none tabular-nums">
+          {marketPrice.price.toFixed(2)}
+        </span>
+        <span className="text-[9px] text-zinc-400">
+          {sourceBadgeLabel(marketPrice.source)}
+          <span
+            className={
+              online ? " text-emerald-400" : " text-amber-400"
+            }
+          >
+            {" "}
+            ● {online ? "Online" : "Offline"}
+          </span>
         </span>
       </div>
-      <p className="mt-0.5 text-2xl font-bold tabular-nums text-zinc-900">
-        {marketPrice.price.toFixed(2)}
-      </p>
-      <p className="text-xs tabular-nums text-zinc-600">
+      <p className="mt-0.5 text-[9px] leading-tight tabular-nums text-zinc-400">
         {marketPrice.bid.toFixed(2)} / {marketPrice.ask.toFixed(2)}
+        <span className="text-zinc-500">
+          {" "}
+          · оновл. {formatTimeUk(marketPrice.updatedAt)}
+        </span>
       </p>
-      <p className="mt-1 text-[10px] text-zinc-500">
-        {formatTimeUk(marketPrice.updatedAt)}
-      </p>
+      {!isMeta ? (
+        <span className="text-[8px] text-amber-400/90">mock feed</span>
+      ) : null}
     </div>
   );
+}
+
+function HeaderStatChips({ dashboard }: { dashboard: DashboardResponse }) {
+  const { stats } = dashboard;
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <HeaderStatChip
+        emoji="📰"
+        value={stats.totalNews}
+        label={HEADER_STAT_CHIPS.news}
+        tone="info"
+      />
+      <HeaderStatChip
+        emoji="⏳"
+        value={stats.pendingAnalysisNewsCount}
+        label={HEADER_STAT_CHIPS.pendingAnalysis}
+        tone="pending"
+      />
+      <HeaderStatChip
+        emoji="🔍"
+        value={stats.analyzedNewsCount}
+        label={HEADER_STAT_CHIPS.analyzed}
+        tone="ok"
+      />
+      <HeaderStatChip
+        emoji="⚠️"
+        value={stats.failedAnalysisNewsCount}
+        label={HEADER_STAT_CHIPS.analysisFailed}
+        tone="fail"
+      />
+      <HeaderStatChip
+        emoji="⏳"
+        value={stats.pendingPredictions}
+        label={HEADER_STAT_CHIPS.pendingPredictions}
+        tone="pending"
+      />
+      <HeaderStatChip
+        emoji="📊"
+        value={stats.activePredictions}
+        label={HEADER_STAT_CHIPS.activePredictions}
+        tone="active"
+      />
+      <HeaderStatChip
+        emoji="✅"
+        value={stats.successfulPredictions}
+        label={HEADER_STAT_CHIPS.success}
+        tone="ok"
+      />
+      <HeaderStatChip
+        emoji="❌"
+        value={stats.failedPredictions}
+        label={HEADER_STAT_CHIPS.failed}
+        tone="fail"
+      />
+    </div>
+  );
+}
+
+function formatNewsSyncCompact(value: string | null): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  const now = new Date();
+  const sameDay =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+  if (sameDay) return formatTimeUk(d);
+  return d.toLocaleString("uk-UA", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function DashboardHeader({
@@ -598,66 +690,28 @@ function DashboardHeader({
   dashboard: DashboardResponse;
   lastUpdated: Date | null;
 }) {
+  const updatedStr = lastUpdated ? formatTimeUk(lastUpdated) : "—";
+  const newsSyncStr = formatNewsSyncCompact(dashboard.lastNewsSyncAt);
+
   return (
-    <header className="sticky top-0 z-20 border-b border-amber-200/70 bg-white/95 backdrop-blur-sm">
-      <div
-        className={`${PAGE_SHELL} flex flex-col gap-2 px-2 py-2 lg:flex-row lg:items-start lg:justify-between`}
-      >
-        <div className="min-w-0 flex-1">
-          <h1 className="text-lg font-bold tracking-tight text-amber-950">
+    <header className="sticky top-0 z-20 border-b border-zinc-300/90 bg-zinc-100/95 backdrop-blur-sm">
+      <div className={`${PAGE_SHELL} space-y-1 py-1.5`}>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="truncate text-sm font-bold tracking-tight text-zinc-900">
             GoldNews AI Orchestrator
           </h1>
-          <ul className="mt-1 space-y-0.5 text-xs text-zinc-600">
-            <li>Автооновлення: кожні 10 сек</li>
-            <li>
-              Останнє оновлення: {lastUpdated ? formatTimeUk(lastUpdated) : "—"}
-            </li>
-            <li>
-              Остання синхронізація новин:{" "}
-              {dashboard.lastNewsSyncAt
-                ? formatDateTimeUk(dashboard.lastNewsSyncAt)
-                : "—"}
-            </li>
-          </ul>
+          <HeaderLivePrice dashboard={dashboard} />
         </div>
-        <HeaderLivePrice dashboard={dashboard} />
-      </div>
 
-      <div
-        className={`${PAGE_SHELL} grid grid-cols-2 gap-1.5 px-2 pb-2 sm:grid-cols-4 xl:grid-cols-8`}
-      >
-        <StatCard
-          label={STATS_LABELS.totalNews}
-          value={dashboard.stats.totalNews}
-        />
-        <StatCard
-          label={STATS_LABELS.pendingAnalysis}
-          value={dashboard.stats.pendingAnalysisNewsCount}
-        />
-        <StatCard
-          label={STATS_LABELS.analyzed}
-          value={dashboard.stats.analyzedNewsCount}
-        />
-        <StatCard
-          label={STATS_LABELS.failedAnalysis}
-          value={dashboard.stats.failedAnalysisNewsCount}
-        />
-        <StatCard
-          label={STATS_LABELS.pendingPredictions}
-          value={dashboard.stats.pendingPredictions}
-        />
-        <StatCard
-          label={STATS_LABELS.activePredictions}
-          value={dashboard.stats.activePredictions}
-        />
-        <StatCard
-          label={STATS_LABELS.successful}
-          value={dashboard.stats.successfulPredictions}
-        />
-        <StatCard
-          label={STATS_LABELS.failed}
-          value={dashboard.stats.failedPredictions}
-        />
+        <HeaderStatChips dashboard={dashboard} />
+
+        <p className="text-[9px] leading-tight text-zinc-500">
+          <span>Авто 10с</span>
+          <span className="text-zinc-400"> • </span>
+          <span>Оновлено {updatedStr}</span>
+          <span className="text-zinc-400"> • </span>
+          <span>Новини {newsSyncStr}</span>
+        </p>
       </div>
     </header>
   );
