@@ -1,4 +1,5 @@
 import {
+  forwardRef,
   Inject,
   Injectable,
   Logger,
@@ -76,7 +77,9 @@ export class PredictionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly newsService: NewsService,
+    @Inject(forwardRef(() => MarketService))
     private readonly marketService: MarketService,
+    @Inject(forwardRef(() => EventStartPriceService))
     private readonly eventStartPriceService: EventStartPriceService,
     private readonly serverLogs: ServerLogsService,
     @Optional()

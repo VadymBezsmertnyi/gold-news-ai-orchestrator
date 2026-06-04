@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { forwardRef, Inject, Injectable, Logger } from '@nestjs/common';
 import {
   PredictionSourceType,
   PredictionStatus,
@@ -34,8 +34,11 @@ export class EventStartPriceService {
 
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => MetaApiLivePriceService))
     private readonly metaApiLive: MetaApiLivePriceService,
+    @Inject(forwardRef(() => MetaApiHistoricalPriceService))
     private readonly metaApiHistorical: MetaApiHistoricalPriceService,
+    @Inject(forwardRef(() => MarketService))
     private readonly marketService: MarketService,
     private readonly serverLogs: ServerLogsService,
   ) {}
