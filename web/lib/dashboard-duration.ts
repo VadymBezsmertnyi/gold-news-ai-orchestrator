@@ -1,8 +1,20 @@
-/** `DD HH:mm` — days, hours, minutes (e.g. `01 02:30`, `00 00:37`). */
-export function formatDurationDdHhMm(ms: number): string {
-  const totalMinutes = Math.max(0, Math.floor(ms / 60_000));
-  const days = Math.floor(totalMinutes / (24 * 60));
-  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
-  const minutes = totalMinutes % 60;
-  return `${String(days).padStart(2, "0")} ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+/** Human-readable Ukrainian duration (e.g. `45 хв`, `1г 20хв`, `2д 3г`). */
+export function formatDurationHumanUk(ms: number): string {
+  const totalMins = Math.max(1, Math.ceil(ms / 60_000));
+  if (totalMins < 60) return `${totalMins} хв`;
+
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  const days = Math.floor(hours / 24);
+  const hrs = hours % 24;
+
+  if (days >= 1) {
+    const parts = [`${days}д`];
+    if (hrs > 0) parts.push(`${hrs}г`);
+    if (mins > 0) parts.push(`${mins}хв`);
+    return parts.join(" ");
+  }
+
+  if (mins === 0) return `${hours}г`;
+  return `${hours}г ${mins}хв`;
 }

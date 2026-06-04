@@ -1,5 +1,5 @@
 import type { DashboardNewsRow, DashboardPredictionRow } from "./types";
-import { sortPredictionsByCheckAfter } from "./dashboard-format";
+import { getEventLifecyclePhase } from "./dashboard-event-state";
 
 /** Lower = higher priority (HIGH first). GLOBAL_CONTEXT sorts with HIGH. */
 export function impactSortOrder(
@@ -14,16 +14,47 @@ export function impactSortOrder(
   return 4;
 }
 
-export function sortPredictionsByImpact(
+const LIFECYCLE_ORDER: Record<"active" | "upcoming" | "finished", number> = {
+  active: 0,
+  upcoming: 1,
+  finished: 2,
+};
+
+function eventEndMs(row: DashboardPredictionRow): number {
+  return new Date(row.eventEndAt ?? row.checkAfter).getTime();
+}
+
+function eventStartMs(row: DashboardPredictionRow): number {
+  return row.eventStartAt
+    ? new Date(row.eventStartAt).getTime()
+    : eventEndMs(row);
+}
+
+/** Active → upcoming → finished; sorted within each group by event times. */
+export function sortPredictionsByLifecycle(
   rows: DashboardPredictionRow[],
+  now = new Date(),
 ): DashboardPredictionRow[] {
-  const ordered = sortPredictionsByCheckAfter(rows);
-  return [...ordered].sort((a, b) => {
-    const impactDiff =
-      impactSortOrder(a.impactLevel, a.sourceType) -
-      impactSortOrder(b.impactLevel, b.sourceType);
-    if (impactDiff !== 0) return impactDiff;
-    return 0;
+  return [...rows].sort((a, b) => {
+    const phaseA = getEventLifecyclePhase(
+      a.eventStartAt,
+      a.eventEndAt,
+      a.checkAfter,
+      now,
+    );
+    const phaseB = getEventLifecyclePhase(
+      b.eventStartAt,
+      b.eventEndAt,
+      b.checkAfter,
+      now,
+    );
+
+    const groupDiff = LIFECYCLE_ORDER[phaseA] - LIFECYCLE_ORDER[phaseB];
+    if (groupDiff !== 0) return groupDiff;
+
+    if (phaseA === "active") return eventEndMs(a) - eventEndMs(b);
+    if (phaseA === "upcoming") return eventStartMs(a) - eventStartMs(b);
+    return eventEndMs(b) - eventEndMs(a);
   });
 }
 

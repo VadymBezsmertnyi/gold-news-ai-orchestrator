@@ -1,13 +1,30 @@
-import { formatTimeUk } from "./dashboard-format";
-import { formatDurationDdHhMm } from "./dashboard-duration";
+import { formatDurationHumanUk } from "./dashboard-duration";
 
 export type EventStateTone = "upcoming" | "active" | "ended";
 
+export type EventLifecyclePhase = "active" | "upcoming" | "finished";
+
 export interface EventStateDisplay {
-  title: string;
+  title: string | null;
   line2: string | null;
-  line3: string | null;
   tone: EventStateTone;
+}
+
+export function getEventLifecyclePhase(
+  eventStartAt: string | null,
+  eventEndAt: string | null,
+  checkAfter: string,
+  now = new Date(),
+): EventLifecyclePhase {
+  const start = eventStartAt ? new Date(eventStartAt) : null;
+  const end = new Date(eventEndAt ?? checkAfter);
+
+  if (!start || Number.isNaN(start.getTime())) return "finished";
+
+  const nowMs = now.getTime();
+  if (nowMs < start.getTime()) return "upcoming";
+  if (nowMs <= end.getTime()) return "active";
+  return "finished";
 }
 
 export function formatEventState(
@@ -20,7 +37,7 @@ export function formatEventState(
   const end = new Date(eventEndAt ?? checkAfter);
 
   if (!start || Number.isNaN(start.getTime())) {
-    return { title: "—", line2: null, line3: null, tone: "ended" };
+    return { title: "—", line2: null, tone: "ended" };
   }
 
   const nowMs = now.getTime();
@@ -29,9 +46,8 @@ export function formatEventState(
 
   if (nowMs < startMs) {
     return {
-      title: "Starts soon",
-      line2: `in ${formatDurationDdHhMm(startMs - nowMs)}`,
-      line3: `at ${formatTimeUk(start)}`,
+      title: null,
+      line2: `Почнеться через ${formatDurationHumanUk(startMs - nowMs)}`,
       tone: "upcoming",
     };
   }
@@ -39,18 +55,16 @@ export function formatEventState(
   if (nowMs <= endMs) {
     const remaining = Math.max(0, endMs - nowMs);
     return {
-      title: "Active",
-      line2: `remaining ${formatDurationDdHhMm(remaining)}`,
-      line3: `until ${formatTimeUk(end)}`,
+      title: "Активна",
+      line2: `залишилось ${formatDurationHumanUk(remaining)}`,
       tone: "active",
     };
   }
 
   const ago = nowMs - endMs;
   return {
-    title: "Finished",
-    line2: `${formatDurationDdHhMm(ago)} ago`,
-    line3: null,
+    title: "Завершена",
+    line2: `${formatDurationHumanUk(ago)} тому`,
     tone: "ended",
   };
 }
@@ -65,5 +79,5 @@ export function formatEventWindowDuration(
   const end = new Date(eventEndAt ?? checkAfter);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
   const ms = Math.max(0, end.getTime() - start.getTime());
-  return formatDurationDdHhMm(ms);
+  return formatDurationHumanUk(ms);
 }

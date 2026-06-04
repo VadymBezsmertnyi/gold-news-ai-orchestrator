@@ -31,7 +31,7 @@ import { liveEvaluationForRow } from "@/lib/dashboard-live-evaluation";
 import {
   predictionSummaryChips,
   sortNewsByImpact,
-  sortPredictionsByImpact,
+  sortPredictionsByLifecycle,
 } from "@/lib/dashboard-grouping";
 import {
   CHIP_LABELS,
@@ -71,8 +71,8 @@ const TABLE_SHELL =
   "w-full overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm";
 const TABLE_CLASS = "w-full table-fixed border-collapse text-left text-sm";
 const TH =
-  "px-2 py-1.5 text-left text-[9px] font-semibold uppercase tracking-wide text-zinc-500";
-const TD = "px-2 py-1.5 align-top text-[11px]";
+  "px-2 py-1 text-left text-[9px] font-semibold uppercase tracking-wide text-zinc-500";
+const TD = "px-2 py-1 align-top text-[10px] leading-tight";
 const TD_NUM = `${TD} tabular-nums`;
 
 function StatCard({ label, value }: { label: string; value: number }) {
@@ -165,14 +165,6 @@ function StatusBadge({
   );
 }
 
-const STATUS_EMOJI: Partial<Record<PredictionStatusTone, string>> = {
-  success: "🟢 ",
-  failed: "🔴 ",
-  pending: "🟡 ",
-  overdue: "🟠 ",
-  noBaseline: "⚫ ",
-};
-
 const LIVE_EVAL_EMOJI: Record<LiveEvalTone, string> = {
   confirm: "🟢 ",
   deny: "🔴 ",
@@ -185,7 +177,45 @@ const EVENT_STATE_EMOJI = {
   ended: "⚫ ",
 } as const;
 
-function PredictionStatusBadge({
+const STATUS_DOT: Record<PredictionStatusTone, string> = {
+  success: "bg-emerald-500",
+  failed: "bg-red-500",
+  pending: "bg-amber-400",
+  overdue: "bg-orange-500",
+  noBaseline: "bg-zinc-500",
+  muted: "bg-zinc-400",
+};
+
+const STATUS_TEXT: Record<PredictionStatusTone, string> = {
+  success: "text-emerald-700",
+  failed: "text-red-700",
+  pending: "text-amber-800",
+  overdue: "text-orange-700",
+  noBaseline: "text-zinc-700",
+  muted: "text-zinc-600",
+};
+
+function CompactStatusIndicator({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: PredictionStatusTone;
+}) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 font-medium ${STATUS_TEXT[tone]}`}
+    >
+      <span
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[tone]}`}
+        aria-hidden
+      />
+      {label}
+    </span>
+  );
+}
+
+function PredictionStatusIndicator({
   row,
 }: {
   row: Pick<
@@ -194,13 +224,8 @@ function PredictionStatusBadge({
   >;
 }) {
   const display = translatePredictionDisplayStatus(row);
-  const emoji = STATUS_EMOJI[display.tone] ?? "";
   return (
-    <StatusBadge
-      label={`${emoji}${display.label}`}
-      tone={display.tone}
-      size="lg"
-    />
+    <CompactStatusIndicator label={display.label} tone={display.tone} />
   );
 }
 
@@ -236,17 +261,18 @@ function EventStateCell({
     row.checkAfter,
   );
   const emoji = EVENT_STATE_EMOJI[state.tone];
+  const primary = state.title ?? state.line2;
+  const secondary = state.title ? state.line2 : null;
   return (
-    <div className="max-w-[9.5rem] leading-snug">
-      <p className="font-semibold text-zinc-800">
-        {emoji}
-        {state.title}
-      </p>
-      {state.line2 ? (
-        <p className="text-[10px] text-zinc-600">{state.line2}</p>
+    <div className="leading-tight">
+      {primary ? (
+        <p className="font-medium text-zinc-800">
+          {emoji}
+          {primary}
+        </p>
       ) : null}
-      {state.line3 ? (
-        <p className="text-[10px] text-zinc-500">{state.line3}</p>
+      {secondary ? (
+        <p className="text-[9px] text-zinc-600">{secondary}</p>
       ) : null}
     </div>
   );
@@ -321,7 +347,7 @@ function RowExpandButton({
       type="button"
       onClick={onToggle}
       aria-expanded={expanded}
-      className="mr-1.5 shrink-0 rounded border border-zinc-200 bg-zinc-50 px-1 py-0.5 text-[10px] text-zinc-600 hover:bg-zinc-100"
+      className="mr-1 shrink-0 rounded border border-zinc-200 bg-zinc-50 px-0.5 py-px text-[9px] leading-none text-zinc-600 hover:bg-zinc-100"
       title={expanded ? ROW_DETAILS_LABELS.collapse : ROW_DETAILS_LABELS.expand}
     >
       {expanded ? "▼" : "▶"}
@@ -651,7 +677,7 @@ function predictionRowClasses(row: DashboardPredictionRow): string {
 function NewsTitleCell({ title }: { title: string }) {
   return (
     <span
-      className="line-clamp-2 text-sm font-medium leading-snug text-zinc-800"
+      className="line-clamp-2 text-[11px] font-medium leading-tight text-zinc-800"
       title={title}
     >
       {title}
@@ -660,17 +686,17 @@ function NewsTitleCell({ title }: { title: string }) {
 }
 
 const PREDICTION_COL_WIDTHS = [
-  "w-[18%]",
+  "w-[24%]",
   "w-[5%]",
   "w-[6%]",
   "w-[5%]",
+  "w-[8%]",
+  "w-[13%]",
+  "w-[8%]",
+  "w-[8%]",
+  "w-[7%]",
+  "w-[7%]",
   "w-[9%]",
-  "w-[11%]",
-  "w-[7%]",
-  "w-[7%]",
-  "w-[6%]",
-  "w-[6%]",
-  "w-[20%]",
 ] as const;
 
 const PREDICTION_COL_COUNT = PREDICTION_COL_WIDTHS.length;
@@ -730,7 +756,7 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                   </td>
                   <td className={TD_NUM}>{row.confidence}%</td>
                   <td className={TD}>
-                    <PredictionStatusBadge row={row} />
+                    <PredictionStatusIndicator row={row} />
                   </td>
                   <td className={TD}>
                     <EventStateCell row={row} />
@@ -741,7 +767,7 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                   <tr
                     className={`${predictionRowBg(row)} border-l-4 border-l-zinc-300`}
                   >
-                    <td colSpan={colCount} className="px-4 py-3">
+                    <td colSpan={colCount} className="px-3 py-2">
                       <PredictionRowDetails row={row} />
                     </td>
                   </tr>
@@ -1076,7 +1102,7 @@ export default function DashboardClient() {
 
   const sortedPredictions = useMemo(() => {
     if (!dashboard) return [];
-    return sortPredictionsByImpact(dashboard.recentPredictions);
+    return sortPredictionsByLifecycle(dashboard.recentPredictions);
   }, [dashboard, tick]);
 
   const sortedNews = useMemo(() => {
