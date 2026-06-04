@@ -1,8 +1,8 @@
 import {
-  forwardRef,
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import {
   PredictionDirection,
@@ -18,7 +18,10 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 // modules
 import { MarketService } from '../market/market.service';
 import { NewsService } from '../news/news.service';
-import { OrchestratorService } from '../orchestrator/orchestrator.service';
+import {
+  PREDICTION_EVALUATION_HANDLER,
+  type PredictionEvaluationHandler,
+} from '../orchestrator/orchestrator.tokens';
 
 export interface EvaluateDueSummary {
   evaluated: number;
@@ -38,8 +41,9 @@ export class PredictionsService {
     private readonly prisma: PrismaService,
     private readonly newsService: NewsService,
     private readonly marketService: MarketService,
-    @Inject(forwardRef(() => OrchestratorService))
-    private readonly orchestratorService: OrchestratorService,
+    @Optional()
+    @Inject(PREDICTION_EVALUATION_HANDLER)
+    private readonly evaluationHandler: PredictionEvaluationHandler | null,
   ) {}
 
   async findAll(limit = 50): Promise<Prediction[]> {
@@ -199,12 +203,12 @@ export class PredictionsService {
     });
 
     const updated = await this.findById(predictionId);
-
-    void this.orchestratorService
-      .onPredictionEvaluated(updated, result)
-      .catch((err) => {
-        console.warn('Post-evaluation orchestrator hook failed', err);
-      });
+    if (this.evaluationHandler)
+      void this.evaluationHandler
+        .onPredictionEvaluated(updated, result)
+        .catch((err) => {
+          console.warn('Post-evaluation orchestrator hook failed', err);
+        });
 
     return { prediction: updated, result, alreadyEvaluated: false };
   }

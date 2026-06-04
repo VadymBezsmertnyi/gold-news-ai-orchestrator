@@ -12,16 +12,6 @@ export class LearningAgent {
   constructor(private readonly llmRouter: LlmRouterService) {}
 
   async run(input: LearningAgentInput): Promise<LearningAgentOutput> {
-    const provider =
-      this.llmRouter.resolveProviderFromEnv(
-        'LEARNING_AGENT_PROVIDER',
-        LlmProviderType.CLAUDE,
-      ) ?? LlmProviderType.MOCK;
-    const model =
-      process.env.LEARNING_AGENT_MODEL?.trim() ||
-      process.env.CLAUDE_MODEL_SMART ||
-      'claude-sonnet-4-6';
-
     const payload = JSON.stringify(
       {
         news: {
@@ -54,8 +44,8 @@ export class LearningAgent {
     );
 
     return this.llmRouter.askJson<LearningAgentOutput>({
-      provider,
-      model,
+      provider: LlmProviderType.CLAUDE,
+      model: process.env.CLAUDE_MODEL_SMART || 'claude-sonnet-4-6',
       temperature: 0.15,
       maxTokens: 700,
       system:

@@ -11,6 +11,7 @@ import { AgentsModule } from './modules/agents/agents.module';
 import { LearningModule } from './modules/learning/learning.module';
 import { MarketModule } from './modules/market/market.module';
 import { NewsModule } from './modules/news/news.module';
+import { OrchestratorIntegrationModule } from './modules/orchestrator/orchestrator-integration.module';
 import { OrchestratorModule } from './modules/orchestrator/orchestrator.module';
 import { PredictionsModule } from './modules/predictions/predictions.module';
 import { SchedulerModule } from './modules/scheduler/scheduler.module';
@@ -27,6 +28,7 @@ import { SchedulerModule } from './modules/scheduler/scheduler.module';
     AgentsModule,
     LearningModule,
     OrchestratorModule,
+    OrchestratorIntegrationModule,
     SchedulerModule,
   ],
 })

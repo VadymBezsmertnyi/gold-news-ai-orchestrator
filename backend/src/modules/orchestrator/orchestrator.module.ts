@@ -11,18 +11,19 @@ import { MarketModule } from '../market/market.module';
 // local
 import { OrchestratorController } from './orchestrator.controller';
 import { OrchestratorService } from './orchestrator.service';
+import { PredictionEvaluationHooksService } from './prediction-evaluation-hooks.service';
 
 @Module({
   imports: [
     AiModule,
-    MarketModule,
+    forwardRef(() => MarketModule),
     NewsModule,
     forwardRef(() => PredictionsModule),
     LearningModule,
     AgentsModule,
   ],
   controllers: [OrchestratorController],
-  providers: [OrchestratorService],
-  exports: [OrchestratorService],
+  providers: [OrchestratorService, PredictionEvaluationHooksService],
+  exports: [OrchestratorService, PredictionEvaluationHooksService],
 })
 export class OrchestratorModule {}

@@ -4,8 +4,6 @@ import {
   PredictionDirection,
   PredictionSourceType,
   PredictionStatus,
-  type Prediction,
-  type PredictionResult,
 } from '@prisma/client';
 
 // common
@@ -27,8 +25,6 @@ import { NewsClassifierAgent } from '../ai/agents/news-classifier.agent';
 import { SingleNewsImpactAgent } from '../ai/agents/single-news-impact.agent';
 import { PredictionAgent } from '../ai/agents/prediction.agent';
 import { GlobalMarketContextAgent } from '../ai/agents/global-market-context.agent';
-import { LearningAgent } from '../ai/agents/learning.agent';
-
 export type GlobalContextTrigger =
   | 'HIGH_IMPACT_NEWS'
   | 'IMPORTANT_PREDICTION_RESULT'
@@ -152,9 +148,6 @@ export class OrchestratorService {
   private readonly scheduleIntervalMs =
     Number(process.env.GLOBAL_CONTEXT_SCHEDULE_MINUTES ?? 30) * 60 * 1000;
   private readonly predictionStaleMs = 30 * 60 * 1000;
-  private readonly learningMinConfidence = Number(
-    process.env.LEARNING_AGENT_MIN_CONFIDENCE ?? 60,
-  );
 
   constructor(
     private readonly prisma: PrismaService,
@@ -167,7 +160,6 @@ export class OrchestratorService {
     private readonly singleNewsImpactAgent: SingleNewsImpactAgent,
     private readonly predictionAgent: PredictionAgent,
     private readonly globalMarketContextAgent: GlobalMarketContextAgent,
-    private readonly learningAgent: LearningAgent,
     private readonly marketService: MarketService,
     private readonly metaApiLive: MetaApiLivePriceService,
   ) {}
@@ -293,19 +285,6 @@ export class OrchestratorService {
     } finally {
       this.globalContextInFlight = null;
     }
-  }
-
-  async onPredictionEvaluated(
-    prediction: Prediction & { result: PredictionResult | null },
-    result: PredictionResult,
-  ): Promise<void> {
-    if (result.isSuccess) {
-      await this.maybeTriggerGlobalContextAfterResult(prediction, result);
-      return;
-    }
-
-    await this.runLearningAfterFailure(prediction, result);
-    await this.maybeTriggerGlobalContextAfterResult(prediction, result);
   }
 
   async analyzePendingNews(
@@ -686,111 +665,6 @@ export class OrchestratorService {
     };
   }
 
-  private async maybeTriggerGlobalContextAfterResult(
-    prediction: Prediction,
-    result: PredictionResult,
-  ): Promise<void> {
-    const isFreshGlobal =
-      prediction.sourceType === PredictionSourceType.GLOBAL_CONTEXT &&
-      Date.now() - prediction.createdAt.getTime() < 2 * 60 * 1000;
-    if (isFreshGlobal) return;
-
-    const shouldTrigger =
-      prediction.confidence >= 70 ||
-      !result.isSuccess ||
-      prediction.sourceType === PredictionSourceType.GLOBAL_CONTEXT;
-
-    if (!shouldTrigger) return;
-
-    void this.runGlobalMarketContextAnalysis(
-      'IMPORTANT_PREDICTION_RESULT',
-    ).catch((err) =>
-      this.logger.warn('Global context after prediction result failed', err),
-    );
-  }
-
-  private async runLearningAfterFailure(
-    prediction: Prediction,
-    result: PredictionResult,
-  ): Promise<void> {
-    if (prediction.sourceType !== PredictionSourceType.SINGLE_NEWS) return;
-    if (!prediction.newsItemId) return;
-
-    await this.serverLogsService.info(
-      SERVER_LOG_TYPES.LEARNING_STARTED,
-      'Learning agent started after failed prediction',
-      { predictionId: prediction.id },
-    );
-
-    try {
-      const news = await this.prisma.newsItem.findUnique({
-        where: { id: prediction.newsItemId },
-      });
-      if (!news) {
-        await this.logLearningSkipped('news_not_found', prediction.id);
-        return;
-      }
-
-      const currentPrice = await this.marketService.getCurrentXauusd();
-      const recentNews = await this.prisma.newsItem.findMany({
-        where: { analysisStatus: NewsAnalysisStatus.ANALYZED },
-        orderBy: { publishedAt: 'desc' },
-        take: 8,
-      });
-      const activeLearningRules = await this.learningService.findActive();
-
-      const output = await this.learningAgent.run({
-        news,
-        prediction,
-        result,
-        currentPrice: currentPrice.price,
-        recentNews: recentNews.map((n) => ({
-          id: n.id,
-          title: n.title,
-          publishedAt: n.publishedAt,
-          category: n.category,
-          impactLevel: n.impactLevel,
-          goldImpact: n.goldImpact,
-          analysisSummary: n.analysisSummary,
-        })),
-        activeLearningRules,
-      });
-
-      if (
-        !output.shouldCreateRule ||
-        output.confidence < this.learningMinConfidence
-      ) {
-        await this.logLearningSkipped(output.reason, prediction.id);
-        return;
-      }
-
-      await this.learningService.createFromFailedPrediction(
-        prediction.id,
-        output.title,
-        output.description,
-      );
-
-      await this.serverLogsService.info(
-        SERVER_LOG_TYPES.LEARNING_RULE_CREATED,
-        'Learning rule created',
-        {
-          predictionId: prediction.id,
-          title: output.title,
-          confidence: output.confidence,
-        },
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Unknown learning error';
-      await this.serverLogsService.error(
-        SERVER_LOG_TYPES.LEARNING_ERROR,
-        `Learning agent failed: ${message}`,
-        { predictionId: prediction.id },
-      );
-      this.logger.error('Learning agent failed', error);
-    }
-  }
-
   private async logGlobalSkipped(
     trigger: GlobalContextTrigger,
     reason: string,
@@ -799,17 +673,6 @@ export class OrchestratorService {
       SERVER_LOG_TYPES.GLOBAL_CONTEXT_SKIPPED,
       `Global market context skipped (${reason})`,
       { trigger, reason },
-    );
-  }
-
-  private async logLearningSkipped(
-    reason: string,
-    predictionId: string,
-  ): Promise<void> {
-    await this.serverLogsService.info(
-      SERVER_LOG_TYPES.LEARNING_SKIPPED,
-      'Learning rule not created',
-      { predictionId, reason },
     );
   }
 

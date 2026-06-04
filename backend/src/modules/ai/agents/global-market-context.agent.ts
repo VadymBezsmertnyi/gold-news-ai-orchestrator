@@ -14,16 +14,6 @@ export class GlobalMarketContextAgent {
   async run(
     input: GlobalMarketContextAgentInput,
   ): Promise<GlobalMarketContextAgentOutput> {
-    const provider =
-      this.llmRouter.resolveProviderFromEnv(
-        'GLOBAL_CONTEXT_PROVIDER',
-        LlmProviderType.CLAUDE,
-      ) ?? LlmProviderType.MOCK;
-    const model =
-      process.env.GLOBAL_CONTEXT_MODEL?.trim() ||
-      process.env.CLAUDE_MODEL_SMART ||
-      'claude-sonnet-4-6';
-
     const payload = JSON.stringify(
       {
         currentPrice: input.currentPrice,
@@ -38,8 +28,8 @@ export class GlobalMarketContextAgent {
     );
 
     return this.llmRouter.askJson<GlobalMarketContextAgentOutput>({
-      provider,
-      model,
+      provider: LlmProviderType.CLAUDE,
+      model: process.env.CLAUDE_MODEL_SMART || 'claude-sonnet-4-6',
       temperature: 0.2,
       maxTokens: 1200,
       system:
