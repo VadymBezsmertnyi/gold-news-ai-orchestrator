@@ -9,10 +9,12 @@ import { AgentsService } from '../agents/agents.service';
 import { LearningService } from '../learning/learning.service';
 import { NewsService } from '../news/news.service';
 import { PredictionsService } from '../predictions/predictions.service';
+import { MarketService } from '../market/market.service';
 
 // agents
 import { NewsClassifierAgent } from '../ai/agents/news-classifier.agent';
 import { SingleNewsImpactAgent } from '../ai/agents/single-news-impact.agent';
+import { PredictionAgent } from '../ai/agents/prediction.agent';
 
 export interface DashboardPredictionRow {
   id: string;
@@ -77,6 +79,8 @@ export class OrchestratorService {
     private readonly agentsService: AgentsService,
     private readonly newsClassifierAgent: NewsClassifierAgent,
     private readonly singleNewsImpactAgent: SingleNewsImpactAgent,
+    private readonly predictionAgent: PredictionAgent,
+    private readonly marketService: MarketService,
   ) {}
 
   async getDashboard(): Promise<DashboardResponse> {
@@ -166,6 +170,18 @@ export class OrchestratorService {
           publishedAt: newsItem.publishedAt,
         });
 
+        const currentPrice = await this.marketService.getCurrentXauusd();
+        const predictionOutput = await this.predictionAgent.run({
+          title: newsItem.title,
+          summary: output.summary,
+          category: output.category,
+          impactLevel: output.impactLevel,
+          goldImpact: impactOutput.goldImpact,
+          impactReason: impactOutput.impactReason,
+          currentPrice: currentPrice.price,
+          publishedAt: newsItem.publishedAt,
+        });
+
         const updatedNewsItem = await this.prisma.newsItem.update({
           where: { id: newsItem.id },
           data: {
@@ -184,12 +200,36 @@ export class OrchestratorService {
           },
         });
 
+        const now = new Date();
+        const checkAfter = new Date(
+          now.getTime() + predictionOutput.timeframeMinutes * 60 * 1000,
+        );
+        await this.prisma.prediction.create({
+          data: {
+            newsItemId: updatedNewsItem.id,
+            direction: predictionOutput.direction,
+            confidence: predictionOutput.confidence,
+            expectedMovePercent: predictionOutput.expectedMovePercent,
+            timeframeMinutes: predictionOutput.timeframeMinutes,
+            reason: predictionOutput.reason,
+            status: 'PENDING',
+            priceAtPrediction: currentPrice.price,
+            checkAfter,
+            sourceType: 'SINGLE_NEWS',
+            validFrom: now,
+            validUntil: checkAfter,
+            expiresAt: checkAfter,
+          },
+        });
+
         results.push({
           id: updatedNewsItem.id,
           title: updatedNewsItem.title,
           category: updatedNewsItem.category,
           impactLevel: updatedNewsItem.impactLevel,
           goldImpact: updatedNewsItem.goldImpact,
+          prediction: predictionOutput,
+          priceAtPrediction: currentPrice.price,
         });
       } catch (error) {
         const message =
