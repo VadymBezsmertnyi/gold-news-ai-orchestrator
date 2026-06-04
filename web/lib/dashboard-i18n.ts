@@ -32,28 +32,37 @@ export const PREDICTION_HEADERS = {
   direction: "Напрям",
   confidence: "Впевненість",
   status: "Статус",
-  result: "Результат",
+  eventState: "Стан події",
   pricePrediction: "Ціна прогнозу",
   priceEventStart: "Ціна старту",
   baselineSource: "Джерело старту",
   current: "Фінальна",
   actualMove: "Факт Δ%",
   expectedMove: "Очік. рух",
-  accuracy: "Оцінка",
-  directionOk: "Вгадано",
-  preview: "Попередньо",
+  moveAccuracy: "Точність руху",
+  finalScore: "Підсумкова оцінка",
+  directionGuess: "Напрям",
+  liveEvaluation: "Live оцінка",
   eventStart: "Старт",
   eventEnd: "Кінець",
-  baselineTimeDiff: "Δ старту",
 } as const;
 
-/** Tooltip for Δ старту column header and cells. */
-export const BASELINE_START_DELTA_TOOLTIP =
-  "Різниця між часом новини та знайденою стартовою ціною";
+export function translateDirectionGuessBadge(value: boolean | null): {
+  label: string;
+  tone: "ok" | "fail" | "muted";
+} {
+  if (value == null) return { label: "—", tone: "muted" };
+  if (value) return { label: "Вгадано", tone: "ok" };
+  return { label: "Не вгадано", tone: "fail" };
+}
 
-export function translateDirectionCorrect(value: boolean | null): string {
-  if (value == null) return "—";
-  return value ? "Так" : "Ні";
+export function scorePercentTone(
+  value: number | null,
+): "low" | "mid" | "high" | "muted" {
+  if (value == null) return "muted";
+  if (value <= 30) return "low";
+  if (value <= 70) return "mid";
+  return "high";
 }
 
 export const NEWS_HEADERS = {
@@ -81,18 +90,6 @@ const ANALYSIS_STATUS_UA: Record<string, string> = {
   FAILED: "Помилка",
 };
 
-const PREDICTION_STATUS_UA: Record<string, string> = {
-  PENDING: "Очікує",
-  SUCCESS: "Успіх",
-  FAILED: "Помилка",
-  EXPIRED: "Прострочено",
-};
-
-const EXPECTED_RESULT_UA: Record<string, string> = {
-  SUCCESS: "Ймовірний успіх",
-  FAILED: "Ймовірна помилка",
-};
-
 export const PREDICTION_IMPORTANT_HINT =
   "Важливі прогнози включають HIGH новини, глобальний контекст, високу впевненість (≥70%) або вже неуспішні результати.";
 
@@ -103,7 +100,7 @@ export const CHIP_LABELS = {
   success: "Успішних",
   failed: "Неуспішних",
   pending: "Очікують",
-  missingBaseline: "Без ціни старту",
+  missingBaseline: "Без стартової ціни",
 } as const;
 
 export function translateImpactLevel(level: string | null): string {
@@ -140,62 +137,43 @@ export function translateAnalysisStatus(status: string): string {
   return ANALYSIS_STATUS_UA[status] ?? status;
 }
 
-export function translatePredictionStatus(
-  status: string,
-  isOverdue = false
-): string {
-  if (status === "PENDING" && isOverdue) return "Не оцінено";
-  return PREDICTION_STATUS_UA[status] ?? status;
-}
-
-export function translateExpectedResult(
-  expected: "SUCCESS" | "FAILED" | null
-): string {
-  if (!expected) return "—";
-  return EXPECTED_RESULT_UA[expected] ?? expected;
-}
-
-export function translatePreviewResult(row: {
-  isPreview: boolean;
-  previewOutcome: "SUCCESS" | "FAILED" | null;
-  missingEventStartPrice: boolean;
-  status: string;
-  result: string | null;
-}): { label: string; tone: PreviewTone } | null {
-  if (row.result) return null;
-  if (row.missingEventStartPrice) return null;
-  if (row.status !== "PENDING" || !row.isPreview || !row.previewOutcome)
-    return null;
-  if (row.previewOutcome === "SUCCESS")
-    return { label: "Ймовірний успіх", tone: "previewOk" };
-  return { label: "Ймовірна помилка", tone: "previewFail" };
-}
-
-export type PreviewTone = "previewOk" | "previewFail" | "insufficient";
-
-export function translateFinalResultBadge(row: {
-  result: string | null;
-  status: string;
-  isOverdue: boolean;
-  missingEventStartPrice: boolean;
-}): { label: string; tone: ResultTone } {
-  if (row.missingEventStartPrice)
-    return { label: "Немає ціни старту", tone: "missingBaseline" };
-  if (row.result === "SUCCESS") return { label: "Успіх", tone: "success" };
-  if (row.result === "FAILED") return { label: "Помилка", tone: "failed" };
-  if (row.status === "PENDING" && row.isOverdue)
-    return { label: "Не оцінено", tone: "overdue" };
-  if (row.status === "PENDING") return { label: "Очікує", tone: "pending" };
-  return { label: "—", tone: "muted" };
-}
-
-export type ResultTone =
+export type PredictionStatusTone =
   | "success"
   | "failed"
   | "pending"
   | "overdue"
-  | "missingBaseline"
+  | "noBaseline"
   | "muted";
+
+/** Single unified status for the predictions table (replaces duplicate status/result columns). */
+export function translatePredictionDisplayStatus(row: {
+  result: string | null;
+  status: string;
+  isOverdue: boolean;
+  missingEventStartPrice: boolean;
+}): { label: string; tone: PredictionStatusTone } {
+  if (row.missingEventStartPrice) {
+    return { label: "Немає стартової ціни", tone: "noBaseline" };
+  }
+  if (row.result === "SUCCESS" || row.status === "SUCCESS") {
+    return { label: "Успіх", tone: "success" };
+  }
+  if (row.result === "FAILED" || row.status === "FAILED") {
+    return { label: "Помилка", tone: "failed" };
+  }
+  if (row.status === "PENDING" && row.isOverdue) {
+    return { label: "Не оцінено", tone: "overdue" };
+  }
+  if (row.status === "PENDING") {
+    return { label: "Очікує", tone: "pending" };
+  }
+  if (row.status === "EXPIRED") {
+    return { label: "Прострочено", tone: "overdue" };
+  }
+  return { label: "—", tone: "muted" };
+}
+
+export type LiveEvalTone = "confirm" | "deny" | "insufficient";
 
 export function translateResult(result: string | null): string {
   if (!result) return "—";
@@ -237,6 +215,13 @@ const BASELINE_SOURCE_UA: Record<string, string> = {
   priceAtPrediction: "Ціна прогнозу",
   missing: "немає",
 };
+
+export const GLOBAL_CONTEXT_LABELS = {
+  drivers: "Основні драйвери",
+  risks: "Ризики",
+  showFull: "Показати повний аналіз",
+  hideFull: "Сховати повний аналіз",
+} as const;
 
 export function translateBaselineSource(source: string | null): string {
   if (!source) return "немає";

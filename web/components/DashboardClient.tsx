@@ -5,9 +5,8 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 // lib
 import { fetchDashboard } from "@/lib/api";
+import { formatEventState } from "@/lib/dashboard-event-state";
 import {
-  formatBaselineStartDelta,
-  formatCheckAfterUk,
   formatDateTimeUk,
   formatPercent,
   formatPrice,
@@ -15,15 +14,16 @@ import {
   metaPreview,
   sortPredictionsByCheckAfter,
 } from "@/lib/dashboard-format";
+import { liveEvaluationForRow } from "@/lib/dashboard-live-evaluation";
 import {
   splitNews,
   splitPredictions,
   predictionSummaryChips,
 } from "@/lib/dashboard-grouping";
 import {
-  BASELINE_START_DELTA_TOOLTIP,
   CHIP_LABELS,
   connectionBadgeLabel,
+  GLOBAL_CONTEXT_LABELS,
   IMPORTANT_NEWS_EMPTY,
   LOG_HEADERS,
   NEWS_HEADERS,
@@ -31,18 +31,17 @@ import {
   PREDICTION_HEADERS,
   SECTION_TITLES,
   predictionSourceLabel,
+  scorePercentTone,
   sourceBadgeLabel,
   STATS_LABELS,
   translateAnalysisStatus,
   translateBaselineSource,
-  translateFinalResultBadge,
+  translateDirectionGuessBadge,
   translateImpactLevel,
   translateLogMessage,
-  translateDirectionCorrect,
-  translatePreviewResult,
-  translatePredictionStatus,
-  type PreviewTone,
-  type ResultTone,
+  translatePredictionDisplayStatus,
+  type LiveEvalTone,
+  type PredictionStatusTone,
 } from "@/lib/dashboard-i18n";
 import type {
   DashboardGlobalContext,
@@ -57,7 +56,7 @@ const PAGE_SHELL = "mx-auto w-[calc(100vw-32px)] max-w-[1900px]";
 const TABLE_SCROLL =
   "overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-zinc-300";
 const PREDICTIONS_TABLE_MIN =
-  "min-w-[1800px] w-full border-collapse text-left text-xs";
+  "min-w-[1680px] w-full border-collapse text-left text-xs";
 const NEWS_TABLE_MIN =
   "min-w-[1100px] w-full border-collapse text-left text-xs";
 const TH = "whitespace-nowrap px-2 py-1.5 font-medium";
@@ -109,9 +108,20 @@ function DirectionBadge({ direction }: { direction: string }) {
 function StatusBadge({
   label,
   tone,
+  size = "sm",
 }: {
   label: string;
-  tone: "pending" | "ok" | "fail" | "muted" | ResultTone | PreviewTone;
+  tone:
+    | "pending"
+    | "ok"
+    | "fail"
+    | "muted"
+    | PredictionStatusTone
+    | LiveEvalTone
+    | "upcoming"
+    | "active"
+    | "ended";
+  size?: "sm" | "lg";
 }) {
   const styles: Record<string, string> = {
     pending: "bg-amber-100 text-amber-900 border-amber-300 font-semibold",
@@ -120,18 +130,116 @@ function StatusBadge({
     muted: "bg-zinc-100 text-zinc-600 border-zinc-200",
     success: "bg-emerald-600 text-white border-emerald-700 font-semibold",
     failed: "bg-red-600 text-white border-red-700 font-semibold",
-    overdue: "bg-amber-500 text-white border-amber-600 font-semibold",
-    missingBaseline:
-      "bg-amber-100 text-amber-950 border-amber-400 font-semibold",
-    previewOk: "bg-emerald-50 text-emerald-800 border-emerald-200",
-    previewFail: "bg-red-50 text-red-800 border-red-200",
-    insufficient: "bg-zinc-100 text-zinc-600 border-zinc-300",
+    overdue: "bg-orange-500 text-white border-orange-600 font-semibold",
+    noBaseline: "bg-zinc-700 text-white border-zinc-800 font-semibold",
+    confirm: "bg-emerald-50 text-emerald-900 border-emerald-300 font-medium",
+    deny: "bg-red-50 text-red-900 border-red-300 font-medium",
+    insufficient: "bg-amber-50 text-amber-900 border-amber-200",
+    upcoming: "bg-amber-50 text-amber-950 border-amber-300",
+    active: "bg-emerald-50 text-emerald-900 border-emerald-300 font-medium",
+    ended: "bg-zinc-100 text-zinc-700 border-zinc-300",
+  };
+  const sizeClass =
+    size === "lg"
+      ? "px-2.5 py-1 text-xs leading-snug"
+      : "px-1.5 py-0.5 text-[10px] leading-tight";
+  return (
+    <span
+      className={`inline-block rounded border ${sizeClass} ${styles[tone] ?? styles.muted}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+const STATUS_EMOJI: Partial<Record<PredictionStatusTone, string>> = {
+  success: "🟢 ",
+  failed: "🔴 ",
+  pending: "🟡 ",
+  overdue: "🟠 ",
+  noBaseline: "⚫ ",
+};
+
+const LIVE_EVAL_EMOJI: Record<LiveEvalTone, string> = {
+  confirm: "🟢 ",
+  deny: "🔴 ",
+  insufficient: "🟡 ",
+};
+
+const EVENT_STATE_EMOJI = {
+  upcoming: "🟡 ",
+  active: "🟢 ",
+  ended: "⚫ ",
+} as const;
+
+function PredictionStatusBadge({
+  row,
+}: {
+  row: Pick<
+    DashboardPredictionRow,
+    "result" | "status" | "isOverdue" | "missingEventStartPrice"
+  >;
+}) {
+  const display = translatePredictionDisplayStatus(row);
+  const emoji = STATUS_EMOJI[display.tone] ?? "";
+  return (
+    <StatusBadge
+      label={`${emoji}${display.label}`}
+      tone={display.tone}
+      size="lg"
+    />
+  );
+}
+
+function ScorePercentCell({ value }: { value: number | null }) {
+  if (value == null) return <span className="text-zinc-400">—</span>;
+  const tone = scorePercentTone(value);
+  const styles: Record<string, string> = {
+    low: "text-red-800 bg-red-50 border-red-200",
+    mid: "text-amber-900 bg-amber-50 border-amber-200",
+    high: "text-emerald-900 bg-emerald-50 border-emerald-200",
+    muted: "text-zinc-600 bg-zinc-50 border-zinc-200",
   };
   return (
     <span
-      className={`inline-block rounded border px-1.5 py-0.5 text-[10px] leading-tight ${styles[tone] ?? styles.muted}`}
+      className={`inline-block rounded border px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${styles[tone]}`}
     >
-      {label}
+      {value.toFixed(0)}%
+    </span>
+  );
+}
+
+function EventStateCell({
+  row,
+}: {
+  row: Pick<
+    DashboardPredictionRow,
+    "eventStartAt" | "eventEndAt" | "checkAfter"
+  >;
+}) {
+  const state = formatEventState(
+    row.eventStartAt,
+    row.eventEndAt,
+    row.checkAfter,
+  );
+  return (
+    <div className="min-w-[9rem]">
+      <StatusBadge
+        label={`${EVENT_STATE_EMOJI[state.tone]}${state.primary}`}
+        tone={state.tone}
+      />
+      {state.secondary ? (
+        <p className="mt-0.5 text-[10px] text-zinc-500">{state.secondary}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function SecondaryDateTime({ value }: { value: string | null }) {
+  if (!value) return <span className="text-zinc-400">—</span>;
+  return (
+    <span className="text-[10px] leading-snug text-zinc-500">
+      {formatDateTimeUk(value)}
     </span>
   );
 }
@@ -175,17 +283,6 @@ function SummaryChips({ rows }: { rows: DashboardPredictionRow[] }) {
       ))}
     </div>
   );
-}
-
-function predictionStatusTone(
-  status: string,
-  isOverdue = false
-): "pending" | "ok" | "fail" | "muted" {
-  if (status === "PENDING" && isOverdue) return "fail";
-  if (status === "PENDING") return "pending";
-  if (status === "SUCCESS") return "ok";
-  if (status === "FAILED" || status === "EXPIRED") return "fail";
-  return "muted";
 }
 
 function analysisStatusTone(
@@ -402,21 +499,19 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
             </th>
             <th className={TH}>{PREDICTION_HEADERS.confidence}</th>
             <th className={TH}>{PREDICTION_HEADERS.status}</th>
-            <th className={TH}>{PREDICTION_HEADERS.result}</th>
+            <th className={TH}>{PREDICTION_HEADERS.eventState}</th>
+            <th className={TH}>{PREDICTION_HEADERS.liveEvaluation}</th>
             <th className={TH}>{PREDICTION_HEADERS.pricePrediction}</th>
             <th className={TH}>{PREDICTION_HEADERS.priceEventStart}</th>
             <th className={TH}>{PREDICTION_HEADERS.baselineSource}</th>
             <th className={TH}>{PREDICTION_HEADERS.current}</th>
             <th className={TH}>{PREDICTION_HEADERS.actualMove}</th>
             <th className={TH}>{PREDICTION_HEADERS.expectedMove}</th>
-            <th className={TH}>{PREDICTION_HEADERS.accuracy}</th>
-            <th className={TH}>{PREDICTION_HEADERS.directionOk}</th>
-            <th className={TH}>{PREDICTION_HEADERS.preview}</th>
+            <th className={TH}>{PREDICTION_HEADERS.moveAccuracy}</th>
+            <th className={TH}>{PREDICTION_HEADERS.finalScore}</th>
+            <th className={TH}>{PREDICTION_HEADERS.directionGuess}</th>
             <th className={TH}>{PREDICTION_HEADERS.eventStart}</th>
             <th className={TH}>{PREDICTION_HEADERS.eventEnd}</th>
-            <th className={TH} title={BASELINE_START_DELTA_TOOLTIP}>
-              {PREDICTION_HEADERS.baselineTimeDiff}
-            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100">
@@ -444,13 +539,21 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                 </td>
                 <td className={`${TD} tabular-nums`}>{row.confidence}%</td>
                 <td className={TD}>
-                  <StatusBadge
-                    label={translatePredictionStatus(row.status, row.isOverdue)}
-                    tone={predictionStatusTone(row.status, row.isOverdue)}
-                  />
+                  <PredictionStatusBadge row={row} />
                 </td>
                 <td className={TD}>
-                  <StatusBadge {...translateFinalResultBadge(row)} />
+                  <EventStateCell row={row} />
+                </td>
+                <td className={TD}>
+                  {(() => {
+                    const live = liveEvaluationForRow(row);
+                    return (
+                      <StatusBadge
+                        label={`${LIVE_EVAL_EMOJI[live.tone]}${live.label}`}
+                        tone={live.tone}
+                      />
+                    );
+                  })()}
                 </td>
                 <td className={`${TD} tabular-nums text-zinc-700`}>
                   {formatPrice(row.priceAtPrediction)}
@@ -459,7 +562,10 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                   className={`${TD} tabular-nums font-medium text-violet-900`}
                 >
                   {row.missingEventStartPrice ? (
-                    <StatusBadge label="Немає старту" tone="pending" />
+                    <StatusBadge
+                      label="⚫ Немає стартової ціни"
+                      tone="noBaseline"
+                    />
                   ) : (
                     formatPrice(row.priceAtEventStart)
                   )}
@@ -480,39 +586,35 @@ function PredictionsTable({ rows }: { rows: DashboardPredictionRow[] }) {
                 <td className={`${TD} tabular-nums`}>
                   {formatPercent(row.expectedMovePercent)}
                 </td>
-                <td className={`${TD} tabular-nums`}>
-                  {row.finalScore != null
-                    ? `${row.finalScore.toFixed(0)}%`
-                    : row.moveAccuracyPercent != null
-                      ? `${row.moveAccuracyPercent.toFixed(0)}%`
-                      : "—"}
+                <td className={TD}>
+                  <ScorePercentCell value={row.moveAccuracyPercent} />
                 </td>
-                <td className={`${TD} tabular-nums`}>
-                  {translateDirectionCorrect(row.directionCorrect)}
+                <td className={TD}>
+                  <ScorePercentCell value={row.finalScore} />
                 </td>
                 <td className={TD}>
                   {(() => {
-                    const preview = translatePreviewResult(row);
-                    if (!preview)
+                    const guess = translateDirectionGuessBadge(
+                      row.directionCorrect,
+                    );
+                    if (guess.tone === "muted")
                       return <span className="text-zinc-400">—</span>;
+                    const emoji = guess.tone === "ok" ? "🟢 " : "🔴 ";
                     return (
-                      <StatusBadge label={preview.label} tone={preview.tone} />
+                      <StatusBadge
+                        label={`${emoji}${guess.label}`}
+                        tone={guess.tone}
+                      />
                     );
                   })()}
                 </td>
-                <td className={`${TD} text-zinc-600`}>
-                  {row.eventStartAt ? formatDateTimeUk(row.eventStartAt) : "—"}
+                <td className={TD}>
+                  <SecondaryDateTime value={row.eventStartAt} />
                 </td>
-                <td className={`${TD} text-zinc-600`}>
-                  {row.eventEndAt
-                    ? formatDateTimeUk(row.eventEndAt)
-                    : formatCheckAfterUk(row.checkAfter)}
-                </td>
-                <td
-                  className={`${TD} tabular-nums text-zinc-600`}
-                  title={BASELINE_START_DELTA_TOOLTIP}
-                >
-                  {formatBaselineStartDelta(row.baselineTimeDiffSeconds)}
+                <td className={TD}>
+                  <SecondaryDateTime
+                    value={row.eventEndAt ?? row.checkAfter}
+                  />
                 </td>
               </tr>
             );
@@ -635,41 +737,72 @@ function PendingNewsTable({ rows }: { rows: DashboardNewsRow[] }) {
 }
 
 function GlobalContextCard({ ctx }: { ctx: DashboardGlobalContext }) {
+  const [expanded, setExpanded] = useState(false);
+  const drivers = ctx.activeDrivers.slice(0, 3);
+  const risks = ctx.riskNotes.slice(0, 3);
+
   return (
     <div className="rounded-lg border border-violet-200/80 bg-gradient-to-br from-violet-50 to-white px-4 py-3 shadow-sm">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-baseline gap-3">
         <DirectionBadge direction={ctx.globalBias} />
-        <span className="text-xs text-zinc-600">
-          Впевненість: <strong>{ctx.confidence}%</strong>
-        </span>
+        <p className="text-sm text-zinc-800">
+          Впевненість:{" "}
+          <strong className="tabular-nums">{ctx.confidence}%</strong>
+        </p>
         <span className="text-[10px] text-zinc-500">
           {formatDateTimeUk(ctx.createdAt)}
         </span>
       </div>
-      <p className="mt-2 text-sm text-zinc-800">{ctx.summary}</p>
-      {ctx.activeDrivers.length > 0 ? (
-        <div className="mt-2">
-          <p className="text-[10px] font-semibold uppercase text-zinc-500">
-            Драйвери
-          </p>
-          <ul className="mt-1 list-inside list-disc text-xs text-zinc-700">
-            {ctx.activeDrivers.map((d) => (
-              <li key={d}>{d}</li>
+
+      <div className="mt-4 border-t border-violet-100/80 pt-3">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+          {GLOBAL_CONTEXT_LABELS.drivers}
+        </p>
+        {drivers.length > 0 ? (
+          <ul className="mt-1.5 space-y-0.5 text-sm text-zinc-800">
+            {drivers.map((d) => (
+              <li key={d} className="flex gap-1.5">
+                <span className="text-violet-400">•</span>
+                <span>{d}</span>
+              </li>
             ))}
           </ul>
-        </div>
-      ) : null}
-      {ctx.riskNotes.length > 0 ? (
-        <div className="mt-2">
-          <p className="text-[10px] font-semibold uppercase text-amber-800/80">
-            Ризики
-          </p>
-          <ul className="mt-1 list-inside list-disc text-xs text-amber-900/90">
-            {ctx.riskNotes.map((n) => (
-              <li key={n}>{n}</li>
+        ) : (
+          <p className="mt-1 text-xs text-zinc-500">—</p>
+        )}
+      </div>
+
+      <div className="mt-3 border-t border-violet-100/80 pt-3">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-800/90">
+          {GLOBAL_CONTEXT_LABELS.risks}
+        </p>
+        {risks.length > 0 ? (
+          <ul className="mt-1.5 space-y-0.5 text-sm text-amber-950/90">
+            {risks.map((n) => (
+              <li key={n} className="flex gap-1.5">
+                <span className="text-amber-500">•</span>
+                <span>{n}</span>
+              </li>
             ))}
           </ul>
-        </div>
+        ) : (
+          <p className="mt-1 text-xs text-zinc-500">—</p>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="mt-3 text-xs font-medium text-violet-800 underline-offset-2 hover:underline"
+      >
+        {expanded
+          ? GLOBAL_CONTEXT_LABELS.hideFull
+          : GLOBAL_CONTEXT_LABELS.showFull}
+      </button>
+      {expanded ? (
+        <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">
+          {ctx.summary}
+        </p>
       ) : null}
     </div>
   );
