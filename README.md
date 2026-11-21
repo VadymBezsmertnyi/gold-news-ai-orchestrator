@@ -1,65 +1,53 @@
 # GoldNews AI Orchestrator
 
-Educational full-stack foundation for XAUUSD / gold news analytics. Runs fully locally with in-process scheduling (no Redis/BullMQ).
+> **Project Status: Discontinued / Portfolio Archive**
 
-## URLs
+## Project Overview
 
-- API: http://localhost:3001
-- Dashboard: http://localhost:3000
+GoldNews AI Orchestrator is a full-stack system that collects economic news for gold (XAUUSD), analyzes it with LLM agents, produces price-reaction predictions, and later checks those predictions against market data. It runs fully locally, with in-process scheduling and no Redis or queue infrastructure.
 
-## Setup
+## Project Background
 
-### Backend
+This is an educational and research project. I built it to get hands-on experience with AI-based analysis of financial news: working with external APIs, orchestrating several LLM agents, automating a recurring pipeline, and testing how well model predictions hold up against real market movements. My goal was practical experience with these technologies, not a commercial product.
 
-```bash
-cd backend
-cp .env.example .env
-npm install
-npm run prisma:generate
-npm run prisma:migrate
-npm run start:dev
-```
+## Key Features
 
-Set `LLM_DEFAULT_PROVIDER=mock` in `.env` for zero-cost local demo (deterministic agent responses).
+- News synchronization from the ForexFactory API, idempotent and deduplicated by an external id
+- A pipeline of LLM agents: news classifier, impact analysis, and prediction
+- One active single-news prediction per news item, evaluated automatically once it is due
+- A learning agent that runs on failed predictions and proposes prompt improvements, with thresholds for promoting and deprecating prompts
+- Live XAUUSD market data through the MetaApi SDK, with candle history lookups
+- A pluggable LLM router that supports a mock provider (deterministic, zero cost), OpenAI, and Claude
+- A dashboard that refreshes every 10 seconds and shows statistics, news, predictions, and database-backed server logs
+- A market-context model that was prepared but left as a placeholder
 
-Set `METAAPI_TOKEN` and `METAAPI_ACCOUNT_ID` for live XAUUSD streaming (optional `METAAPI_SYMBOL=XAUUSD`).
+## Architecture
 
-### Web
+- **Backend (`backend/`)**: a NestJS application with modules for news, agents, AI (LLM router), predictions, learning, market, orchestrator, scheduler, and server logs. Data lives in PostgreSQL through Prisma, with migrations in `backend/prisma`.
+- **Scheduler**: in-process jobs started with the application: an initial sync shortly after startup, a news sync every 10 minutes, analysis of up to two pending news items every minute, and evaluation of due predictions every minute.
+- **Web (`web/`)**: a Next.js dashboard that polls the backend (`GET /orchestrator/dashboard`) and shows the latest server logs (`GET /server-logs`).
+- **Configuration**: environment variables only; see `backend/.env.example` for the variable names. No credentials are stored in the repository.
 
-```bash
-cd web
-cp .env.example .env.local
-npm install
-npm run dev
-```
+## Tech Stack
 
-Open the dashboard — it auto-refreshes every 10 seconds. No buttons required for the main flow.
+- Backend: Node.js, TypeScript, NestJS (`@nestjs/schedule`, `@nestjs/config`), Prisma with PostgreSQL, class-validator
+- AI: OpenAI SDK, Anthropic SDK
+- Market and news data: MetaApi cloud SDK, ForexFactory API access through `axios` and `impit`
+- Web: Next.js, React, TypeScript, Tailwind CSS
+- Tooling: ESLint, Prettier, Jest
 
-## Automatic flow (after `npm run start:dev`)
+## Project Timeline
 
-1. **~3s after startup** — initial news sync, analysis batch, prediction evaluation.
-2. **Every 10 min** — Forex Factory news sync (idempotent, no duplicates).
-3. **Every 1 min** — analyze up to 2 pending news items (classifier → impact → prediction agents).
-4. **Every 1 min** — evaluate due PENDING predictions (`checkAfter <= now`).
-5. **Dashboard** — polls `GET /orchestrator/dashboard` every 10s (stats, news, predictions, server logs).
+- Started: June 2026
+- Discontinued: June 2026
+- Status: Discontinued — Portfolio Archive
 
-## Server logs
+The whole commit history (54 commits) was written within a single day, 4 June 2026.
 
-`GET /server-logs` — latest 100 DB-backed logs from scheduler jobs.
+## Project Status
 
-Types: `news_sync`, `news_analysis`, `prediction_evaluation`, `scheduler`
+The project is discontinued and no longer maintained. It was a short learning and research exercise, and it gave me the practical experience I was looking for. The code is not intended to run in production without your own credentials and infrastructure, and the external APIs it uses may have changed.
 
-## Manual endpoints (optional)
+## Portfolio Note
 
-```bash
-curl -X POST http://localhost:3001/news/mock
-curl -X POST http://localhost:3001/predictions/evaluate-due
-curl -X POST http://localhost:3001/orchestrator/analyze-pending
-```
-
-## Architecture notes
-
-- **News dedup**: `externalId` = `source:id` or `source:publishedAt:titleSlug`
-- **Predictions**: one active `SINGLE_NEWS` PENDING prediction per news item
-- **LLM**: Mock / OpenAI / Claude via `LlmRouterService.resolveAgentProvider()`
-- **Global context**: placeholder only — `MarketContextAnalysis` model ready for later
+I keep this repository as an example of my hands-on experience and growth as a developer. No license has been chosen, so all rights are reserved by the author.
