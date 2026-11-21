@@ -19,12 +19,12 @@ This is an educational and research project. I built it to get hands-on experien
 - Live XAUUSD market data through the MetaApi SDK, with candle history lookups
 - A pluggable LLM router that supports a mock provider (deterministic, zero cost), OpenAI, and Claude
 - A dashboard that refreshes every 10 seconds and shows statistics, news, predictions, and database-backed server logs
-- A market-context model that was prepared but left as a placeholder
+- A scheduled global market-context analysis and capture of the market price at the start of each news event
 
 ## Architecture
 
 - **Backend (`backend/`)**: a NestJS application with modules for news, agents, AI (LLM router), predictions, learning, market, orchestrator, scheduler, and server logs. Data lives in PostgreSQL through Prisma, with migrations in `backend/prisma`.
-- **Scheduler**: in-process jobs started with the application: an initial sync shortly after startup, a news sync every 10 minutes, analysis of up to two pending news items every minute, and evaluation of due predictions every minute.
+- **Scheduler**: in-process jobs started with the application: an initial sync shortly after startup, a news sync every 10 minutes, analysis of up to two pending news items every minute, evaluation of due predictions every minute, a global market-context analysis every 30 minutes, and capture of event-start prices every 30 seconds.
 - **Web (`web/`)**: a Next.js dashboard that polls the backend (`GET /orchestrator/dashboard`) and shows the latest server logs (`GET /server-logs`).
 - **Configuration**: environment variables only; see `backend/.env.example` for the variable names. No credentials are stored in the repository.
 
